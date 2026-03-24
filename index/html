@@ -1,1 +1,1482 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADHD 플래너</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #ffffff; color: #0d0d0d; font-family: system-ui, sans-serif; }
+    :root {
+      --color-background-primary: #ffffff;
+      --color-background-secondary: #f5f5f0;
+      --color-background-tertiary: #eeede8;
+      --color-text-primary: #0d0d0d;
+      --color-text-secondary: #5a5a5a;
+      --color-text-tertiary: #999999;
+      --color-border-tertiary: rgba(0,0,0,0.12);
+      --color-border-secondary: rgba(0,0,0,0.25);
+      --color-border-primary: rgba(0,0,0,0.35);
+      --font-mono: 'Menlo', 'Monaco', 'Consolas', monospace;
+      --font-sans: system-ui, sans-serif;
+      --border-radius-md: 8px;
+      --border-radius-lg: 12px;
+      --border-radius-xl: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1a1a1a; color: #f0f0f0; }
+      :root {
+        --color-background-primary: #1e1e1e;
+        --color-background-secondary: #2a2a2a;
+        --color-background-tertiary: #242424;
+        --color-text-primary: #f0f0f0;
+        --color-text-secondary: #aaaaaa;
+        --color-text-tertiary: #666666;
+        --color-border-tertiary: rgba(255,255,255,0.1);
+        --color-border-secondary: rgba(255,255,255,0.2);
+        --color-border-primary: rgba(255,255,255,0.3);
+      }
+    }
+    input, select, textarea, button {
+      font-family: var(--font-mono);
+      outline: none;
+    }
+    input[type="date"], input[type="time"], input[type="datetime-local"] {
+      color-scheme: light dark;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
+import { useState, useEffect, useCallback, useMemo } from "react";
 
+// ── Firebase 설정 ──
+const FB_CONFIG = {
+  apiKey: "AIzaSyACzn8bEBgA0WuG4jOH7ahJCK67m8LjYAs",
+  authDomain: "adhd-planner-228b8.firebaseapp.com",
+  databaseURL: "https://adhd-planner-228b8-default-rtdb.firebaseio.com",
+  projectId: "adhd-planner-228b8",
+  storageBucket: "adhd-planner-228b8.firebasestorage.app",
+  messagingSenderId: "1082286440854",
+  appId: "1:1082286440854:web:d9201615278fce0725ddb7"
+};
+
+let _firebase = null;
+const getFB = async () => {
+  if (_firebase) return _firebase;
+  const { initializeApp, getApps } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js");
+  const { getDatabase, ref, set, get } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js");
+  const { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+  const app = getApps().length ? getApps()[0] : initializeApp(FB_CONFIG);
+  const db = getDatabase(app);
+  const auth = getAuth(app);
+  _firebase = { db, auth, ref, set, get, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut };
+  return _firebase;
+};
+
+const S = {
+  get: async (k, uid) => {
+    try {
+      const { db, ref, get } = await getFB();
+      const snap = await get(ref(db, `users/${uid}/${k}`));
+      return snap.exists() ? snap.val() : null;
+    } catch (e) {
+      console.error("firebase.get failed:", e);
+      try { const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : null; } catch { return null; }
+    }
+  },
+  set: async (k, v, uid) => {
+    try {
+      const { db, ref, set } = await getFB();
+      await set(ref(db, `users/${uid}/${k}`), v);
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+    } catch (e) {
+      console.error("firebase.set failed:", e);
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+    }
+  }
+};
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const pad = (n) => String(n).padStart(2, "0");
+const parseLocalDate = (s) => {
+  if (!s) return null;
+  const [y, m, d] = s.slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+const parseLocalDateTime = (s) => {
+  if (!s) return null;
+  const [datePart, timePart] = s.split("T");
+  const [y, m, d] = datePart.split("-").map(Number);
+  if (!timePart) return new Date(y, m - 1, d);
+  const [hh = 0, mm = 0] = timePart.split(":").map(Number);
+  return new Date(y, m - 1, d, hh, mm);
+};
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+};
+const dDay = (ds) => {
+  if (!ds) return null;
+  const target = parseLocalDate(ds);
+  if (!target) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((target.getTime() - today.getTime()) / 864e5);
+};
+const fmtTs = (ts) => {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+const fmtDt = (s) => {
+  if (!s) return "";
+  const d = parseLocalDateTime(s);
+  if (!d || isNaN(d)) return s;
+  const hasTime = s.includes("T") && s.slice(11, 16) !== "00:00";
+  return hasTime
+    ? `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+    : `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())}`;
+};
+const makeDt = (date, time) => {
+  if (!date) return "";
+  return time ? `${date}T${time}` : date;
+};
+
+
+const INIT = {
+  energy: 3,
+  deadlines: [],
+  goals: { long: [], mid: [], short: [] },
+  todos: [],
+  routines: [],
+  health: [],
+  quickNotes: [],
+  impulse: [],
+  studyKw: [],
+  lastDate: "",
+};
+
+const amber = "#d97706";
+const green = "#16a34a";
+const sectionColors = {
+  schedule: { border: "#3b82f6", label: "#2563eb" },   // 파랑 — 일정
+  todo:     { border: amber,     label: "#b45309" },    // 앰버 — 할 일
+  goal:     { border: "#0d9488", label: "#0f766e" },    // 틸 — 목표
+  memo:     { border: "#ec4899", label: "#db2777" },    // 핑크 — 퀵메모
+  routine:  { border: "#8b5cf6", label: "#7c3aed" },    // 퍼플 — 루틴
+  health:   { border: green,     label: "#15803d" },    // 그린 — 건강
+  impulse:  { border: "#6b7280", label: "#4b5563" },    // 그레이 — 충동락
+  study:    { border: "#f59e0b", label: "#d97706" },    // 옐로 — 공부
+};
+const sCard = (key) => ({
+  background: "var(--color-background-primary)",
+  border: "0.5px solid var(--color-border-tertiary)",
+  borderRadius: "var(--border-radius-lg)",
+  padding: "0.875rem 1rem",
+  borderTop: `2.5px solid ${sectionColors[key].border}`,
+});
+const sLabel = (key) => ({
+  fontSize: "10px",
+  fontWeight: 500,
+  letterSpacing: "0.1em",
+  color: sectionColors[key].label,
+  marginBottom: "0.625rem",
+  textTransform: "uppercase",
+});
+
+const styles = {
+  card: {
+    background: "var(--color-background-primary)",
+    border: "0.5px solid var(--color-border-tertiary)",
+    borderRadius: "var(--border-radius-lg)",
+    padding: "0.875rem 1rem",
+  },
+  label: {
+    fontSize: "10px",
+    fontWeight: 500,
+    letterSpacing: "0.1em",
+    color: "var(--color-text-tertiary)",
+    marginBottom: "0.625rem",
+    textTransform: "uppercase",
+  },
+  inp: {
+    fontSize: "12px",
+    padding: "5px 8px",
+    fontFamily: "var(--font-mono)",
+    background: "var(--color-background-secondary)",
+    border: "0.5px solid var(--color-border-tertiary)",
+    borderRadius: "var(--border-radius-md)",
+    color: "var(--color-text-primary)",
+    flex: 1,
+    minWidth: 0,
+    outline: "none",
+  },
+  addBtn: (color = amber) => ({
+    fontSize: "12px",
+    padding: "5px 12px",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    background: color,
+    color: "#fff",
+    border: "none",
+    borderRadius: "var(--border-radius-md)",
+    flexShrink: 0,
+    fontWeight: 500,
+  }),
+  pill: (active) => ({
+    fontSize: "11px",
+    padding: "3px 9px",
+    borderRadius: "999px",
+    cursor: "pointer",
+    fontFamily: "var(--font-mono)",
+    background: active ? amber : "transparent",
+    color: active ? "#fff" : "var(--color-text-secondary)",
+    border: `0.5px solid ${active ? amber : "var(--color-border-secondary)"}`,
+    transition: "all 0.12s",
+  }),
+  xBtn: {
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: "var(--color-text-tertiary)",
+    fontSize: "15px",
+    padding: "0",
+    lineHeight: 1,
+    flexShrink: 0,
+  },
+  checkbox: (done, shape = "square", color = amber) => ({
+    width: "14px",
+    height: "14px",
+    cursor: "pointer",
+    flexShrink: 0,
+    border: `1.5px solid ${done ? color : "var(--color-border-secondary)"}`,
+    background: done ? color : "transparent",
+    borderRadius: shape === "circle" ? "50%" : "3px",
+    transition: "all 0.1s",
+  }),
+};
+
+export default function App() {
+  const [d, setD] = useState(INIT);
+  const [ready, setReady] = useState(false);
+  const [user, setUser] = useState(null);       // 로그인 사용자
+  const [authLoading, setAuthLoading] = useState(true); // 인증 확인 중
+  const [goalTab, setGoalTab] = useState("short");
+  const [inp, setInp] = useState({});
+  const [editDl, setEditDl] = useState(null);
+  const _now = new Date();
+  const [calMonth, setCalMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() });
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [calView, setCalView] = useState("month");
+  const [editImpulse, setEditImpulse] = useState(null);
+  const [editRoutine, setEditRoutine] = useState(null);
+  const [editRoutineData, setEditRoutineData] = useState({});
+  const [editImpulseData, setEditImpulseData] = useState({});
+  const [clock, setClock] = useState(new Date());
+  useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
+
+  // ── 인증 상태 감지 ──
+  useEffect(() => {
+    getFB().then(({ auth, onAuthStateChanged }) => {
+      const unsub = onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setAuthLoading(false);
+      });
+      return () => unsub();
+    });
+  }, []);
+
+  // ── 로그인 후 데이터 로드 ──
+  useEffect(() => {
+    if (!user) return;
+    S.get("adhd-v2", user.uid).then((v) => {
+      if (v) {
+        const toArr = (x) => {
+          if (!x) return [];
+          if (Array.isArray(x)) return x;
+          return Object.values(x);
+        };
+        const merged = {
+          ...INIT,
+          ...v,
+          deadlines: toArr(v.deadlines),
+          todos: toArr(v.todos),
+          routines: toArr(v.routines),
+          health: toArr(v.health),
+          quickNotes: toArr(v.quickNotes),
+          impulse: toArr(v.impulse),
+          studyKw: toArr(v.studyKw),
+          goals: {
+            short: toArr(v.goals?.short),
+            mid: toArr(v.goals?.mid),
+            long: toArr(v.goals?.long),
+          },
+        };
+        if (merged.lastDate !== todayStr()) {
+          merged.health = merged.health.map((h) => ({ ...h, done: false }));
+          merged.routines = merged.routines
+            .filter((r) => r.type !== "today")
+            .map((r) => ({ ...r, done: false }));
+          merged.lastDate = todayStr();
+        }
+        setD(merged);
+      } else {
+        setD({ ...INIT, lastDate: todayStr() });
+      }
+      setReady(true);
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (ready && user) S.set("adhd-v2", d, user.uid);
+  }, [d, ready, user]);
+
+  const upd = useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
+  const add = useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
+  const remove = useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
+  const toggle = useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) })), []);
+  const toggleTodo = useCallback((id) => {
+    setD((p) => ({
+      ...p,
+      todos: p.todos.map((x) => {
+        if (x.id !== id) return x;
+        const nextDone = !x.done;
+        return { ...x, done: nextDone, doneAt: nextDone ? Date.now() : null };
+      }),
+    }));
+  }, []);
+  const toggleGoal = useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) } })), []);
+  const removeGoal = useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter((x) => x.id !== id) } })), []);
+  const addGoal = useCallback((tier, title) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: [...p.goals[tier], { id: uid(), title, done: false }] } })), []);
+
+  const updateDeadline = useCallback((id, patch) =>
+    setD((p) => ({ ...p, deadlines: p.deadlines.map((x) => (x.id === id ? { ...x, ...patch } : x)) })), []);
+
+  const i = (k) => inp[k] || "";
+  const si = (k, v) => setInp((p) => ({ ...p, [k]: v }));
+
+  const submit = (k, action, clearKeys = [k]) => {
+    action();
+    clearKeys.forEach((ck) => si(ck, ""));
+  };
+
+  // ── 파생값 (hooks이라 조건부 return 앞에 위치해야 함) ──
+  const today = todayStr();
+  const pendingDeadlines = useMemo(() =>
+    d.deadlines.filter((x) => !x.done).sort((a, b) => {
+      if (!a.endDate && !b.endDate) return 0;
+      if (!a.endDate) return 1;
+      if (!b.endDate) return -1;
+      return (parseLocalDateTime(a.endDate)?.getTime() || 0) - (parseLocalDateTime(b.endDate)?.getTime() || 0);
+    }), [d.deadlines]);
+  const urgent = useMemo(() =>
+    pendingDeadlines.filter((x) => { const dv = dDay(x.endDate); return dv !== null && dv <= 5; }),
+    [pendingDeadlines]);
+  const todayDeadlines = useMemo(() =>
+    d.deadlines.filter(x => {
+      if (x.done) return false;
+      const s = (x.startDate || "").slice(0, 10);
+      const e = (x.endDate || "").slice(0, 10);
+      if (s && e) return s <= today && today <= e;
+      if (s) return s === today;
+      if (e) return e === today;
+      return false;
+    }), [d.deadlines, today]);
+  const routineRepeat = useMemo(() => d.routines.filter(r => r.type !== "today"), [d.routines]);
+  const routineToday = useMemo(() => d.routines.filter(r => r.type === "today"), [d.routines]);
+  const todoDone = d.todos.filter((t) => t.done).length;
+  const todoTotal = d.todos.length;
+  const routineDone = d.routines.filter((r) => r.done).length;
+
+  // ── 인증 확인 중 ──
+  if (authLoading)
+    return (
+      <div style={{ padding: "3rem", fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)", fontSize: "13px", textAlign: "center" }}>
+        잠깐만...
+      </div>
+    );
+
+  // ── 로그인 화면 ──
+  if (!user)
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", gap: "1.5rem", fontFamily: "var(--font-mono)", padding: "2rem" }}>
+        <div style={{ fontSize: "22px", fontWeight: 500, color: "var(--color-text-primary)" }}>ADHD 플래너</div>
+        <div style={{ fontSize: "13px", color: "var(--color-text-secondary)", textAlign: "center", lineHeight: 1.7 }}>
+          구글 계정으로 로그인하면<br />PC와 모바일이 자동으로 싱크돼요
+        </div>
+        <button
+          type="button"
+          onClick={async () => {
+            const { auth, GoogleAuthProvider, signInWithPopup } = await getFB();
+            const provider = new GoogleAuthProvider();
+            try { await signInWithPopup(auth, provider); }
+            catch (e) { console.error("login failed:", e); }
+          }}
+          style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 24px", fontSize: "14px", fontWeight: 500, cursor: "pointer", background: "#fff", color: "#333", border: "1px solid #dadce0", borderRadius: "var(--border-radius-lg)", fontFamily: "var(--font-mono)" }}
+        >
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          구글로 로그인
+        </button>
+      </div>
+    );
+
+  if (!ready)
+    return (
+      <div style={{ padding: "2rem", fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)", fontSize: "13px", textAlign: "center" }}>
+        데이터 불러오는 중...
+      </div>
+    );
+
+  return (
+    <div
+      style={{
+        fontFamily: "var(--font-mono)",
+        maxWidth: "960px",
+        margin: "0 auto",
+        padding: "1rem 0.75rem 2rem",
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.75rem",
+      }}
+    >
+      {/* ── HEADER ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
+        <div>
+          <div style={{ fontSize: "18px", fontWeight: 500, color: "var(--color-text-primary)", lineHeight: 1.3 }}>
+            {clock.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: 500, color: "var(--color-text-primary)", fontFamily: "var(--font-mono)", letterSpacing: "0.05em", marginTop: "2px", display: "flex", alignItems: "baseline", gap: "8px" }}>
+            <span style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-secondary)", letterSpacing: "0.05em" }}>
+              {clock.getHours() < 12 ? "AM" : "PM"}
+            </span>
+            {String(clock.getHours() % 12 || 12).padStart(2,"0")}
+            <span style={{ opacity: clock.getSeconds() % 2 === 0 ? 1 : 0.3, transition: "opacity 0.2s" }}>:</span>
+            {String(clock.getMinutes()).padStart(2,"0")}
+            <span style={{ opacity: clock.getSeconds() % 2 === 0 ? 1 : 0.3, transition: "opacity 0.2s" }}>:</span>
+            <span style={{ fontSize: "16px" }}>{String(clock.getSeconds()).padStart(2,"0")}</span>
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "3px" }}>
+            {urgent.length > 0 ? (
+              <span style={{ color: amber }}>임박 마감 {urgent.length}개</span>
+            ) : (
+              <span>마감 여유 있음</span>
+            )}
+            {todoTotal > 0 && (
+              <span style={{ marginLeft: "12px" }}>
+                할 일 {todoDone}/{todoTotal}
+              </span>
+            )}
+            {d.routines.length > 0 && (
+              <span style={{ marginLeft: "12px" }}>
+                루틴 {routineDone}/{d.routines.length}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "5px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+            {user?.photoURL && <img src={user.photoURL} style={{ width: "20px", height: "20px", borderRadius: "50%" }} />}
+            <span style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>{user?.displayName?.split(" ")[0]}</span>
+            <button type="button" onClick={async () => { const { auth, signOut } = await getFB(); await signOut(auth); setReady(false); setD(INIT); }}
+              style={{ fontSize: "10px", padding: "2px 7px", borderRadius: "999px", cursor: "pointer", background: "transparent", color: "var(--color-text-tertiary)", border: "0.5px solid var(--color-border-tertiary)" }}>
+              로그아웃
+            </button>
+          </div>
+          <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", letterSpacing: "0.08em" }}>ENERGY</div>
+          <div style={{ display: "flex", gap: "4px" }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <div
+                key={n}
+                onClick={() => upd("energy", n)}
+                style={{
+                  width: "22px",
+                  height: "7px",
+                  borderRadius: "2px",
+                  cursor: "pointer",
+                  background: n <= d.energy ? amber : "var(--color-background-secondary)",
+                  border: `0.5px solid ${n <= d.energy ? amber : "var(--color-border-secondary)"}`,
+                  transition: "all 0.12s",
+                }}
+              />
+            ))}
+          </div>
+          <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>
+            {["", "낮음", "낮음", "보통", "좋음", "최고"][d.energy]}
+          </div>
+        </div>
+      </div>
+
+      {/* ── CALENDAR ── */}
+      {(() => {
+        const { year, month } = calMonth;
+        const todayD = new Date(); todayD.setHours(0,0,0,0);
+        const pad = n => String(n).padStart(2,"0");
+        const dlDates = new Set();
+        const dlMonths = new Set();
+        const doneDates = new Set();
+        d.deadlines.filter(x => !x.done).forEach(dl => {
+          [dl.startDate, dl.endDate].forEach(ds => {
+            if (ds) {
+              dlDates.add(ds.slice(0,10));
+              dlMonths.add(ds.slice(0,7));
+            }
+          });
+        });
+        d.todos.filter(x => x.done && x.doneAt).forEach(t => {
+          const ds = new Date(t.doneAt);
+          const dstr = `${ds.getFullYear()}-${pad(ds.getMonth()+1)}-${pad(ds.getDate())}`;
+          doneDates.add(dstr);
+          dlMonths.add(dstr.slice(0,7));
+        });
+
+        const DlPanel = ({ items }) => {
+          if (!items.length) return <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)" }}>일정 없음</div>;
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {items.map(dl => {
+                const dv = dl.endDate ? dDay(dl.endDate) : null;
+                const clr = dv === null ? "var(--color-text-tertiary)" : dv < 0 ? "#dc2626" : dv <= 3 ? "#dc2626" : dv <= 7 ? amber : "var(--color-text-secondary)";
+                return (
+                  <div key={dl.id} style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "7px 10px", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: `2px solid ${dl.done ? "var(--color-border-secondary)" : "#3b82f6"}`, opacity: dl.done ? 0.5 : 1 }}>
+                    <button
+                      type="button"
+                      onClick={() => toggle("deadlines", dl.id)}
+                      style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "999px", cursor: "pointer", fontWeight: 500, border: `1.5px solid ${dl.done ? "#6b7280" : "#3b82f6"}`, background: dl.done ? "#6b7280" : "transparent", color: dl.done ? "#fff" : "#3b82f6", transition: "all 0.15s", flexShrink: 0, marginTop: "2px" }}
+                    >
+                      {dl.done ? "완료" : "일정"}
+                    </button>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-primary)", textDecoration: dl.done ? "line-through" : "none" }}>{dl.title}</div>
+                      <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginTop: "3px", lineHeight: 1.8 }}>
+                        {dl.startDate && <span>▶ {fmtDt(dl.startDate)}　</span>}
+                        {dl.endDate && <span>■ {fmtDt(dl.endDate)}</span>}
+                      </div>
+                      {dl.memo && <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "5px", lineHeight: 1.6 }}>{dl.memo}</div>}
+                    </div>
+                    {dv !== null && !dl.done && <div style={{ fontSize: "13px", fontWeight: 500, color: clr, flexShrink: 0 }}>{dv < 0 ? `D+${Math.abs(dv)}` : dv === 0 ? "D-day" : `D-${dv}`}</div>}
+                    <button type="button" onClick={() => setEditDl({ ...dl })} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        };
+
+        return (
+          <div style={sCard("schedule")}>
+            {/* 뷰 탭 + 네비 */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "6px" }}>
+                {[
+                  ["year", "연", "#7c3aed", "#ede9fe"],
+                  ["month", "#3b82f6", "#dbeafe"],
+                  ["day", "일", "#0f766e", "#ccfbf1"],
+                ].map(([v, label, activeC, activeBg]) => {
+                  const isActive = calView === v;
+                  const colorMap = { year: ["연","#7c3aed","#ede9fe"], month: ["월","#3b82f6","#dbeafe"], day: ["일","#0f766e","#ccfbf1"] };
+                  const [lbl, ac, abg] = colorMap[v];
+                  return (
+                    <button key={v} onClick={() => { setCalView(v); setSelectedDate(null); }} style={{
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      padding: "5px 14px",
+                      borderRadius: "999px",
+                      cursor: "pointer",
+                      border: `1.5px solid ${ac}`,
+                      background: isActive ? ac : "transparent",
+                      color: isActive ? "#fff" : ac,
+                      transition: "all 0.12s",
+                      letterSpacing: "0.05em",
+                    }}>
+                      {lbl} {isActive ? "▼" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <button onClick={() => {
+                  if (calView === "year") setCalMonth(p => ({ ...p, year: p.year - 1 }));
+                  else if (calView === "month") setCalMonth(p => { const d = new Date(p.year, p.month-1,1); return {year:d.getFullYear(),month:d.getMonth()}; });
+                }} style={{ fontSize: "18px", cursor: "pointer", background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", padding: "2px 10px", color: "var(--color-text-secondary)", lineHeight: 1.4, display: calView === "day" ? "none" : "block" }}>←</button>
+                <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-primary)", minWidth: "90px", textAlign: "center" }}>
+                  {calView === "year" ? `${year}년` : calView === "month" ? `${year}년 ${month+1}월 (${["일","월","화","수","목","금","토"][new Date(year,month,1).getDay()]}~${["일","월","화","수","목","금","토"][new Date(year,month+1,0).getDay()]})` : selectedDate ? (() => { const [sy,sm,sd] = selectedDate.split("-").map(Number); return new Date(sy,sm-1,sd).toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"}); })() : "날짜 선택"}
+                </div>
+                <button onClick={() => {
+                  if (calView === "year") setCalMonth(p => ({ ...p, year: p.year + 1 }));
+                  else if (calView === "month") setCalMonth(p => { const d = new Date(p.year, p.month+1,1); return {year:d.getFullYear(),month:d.getMonth()}; });
+                }} style={{ fontSize: "18px", cursor: "pointer", background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", padding: "2px 10px", color: "var(--color-text-secondary)", lineHeight: 1.4, display: calView === "day" ? "none" : "block" }}>→</button>
+              </div>
+            </div>
+
+            {/* 연 뷰 — 12달 그리드 */}
+            {calView === "year" && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+                {Array.from({length:12},(_,mi) => {
+                  const key = `${year}-${pad(mi+1)}`;
+                  const isNow = mi === new Date().getMonth() && year === new Date().getFullYear();
+                  const hasDl = dlMonths.has(key);
+                  const isSel = selectedDate && selectedDate.slice(0,7) === key;
+                  return (
+                    <div key={key} onClick={() => { setCalMonth({ year, month: mi }); setCalView("month"); setSelectedDate(null); }}
+                      style={{ padding: "8px 6px", borderRadius: "var(--border-radius-md)", cursor: "pointer", textAlign: "center", background: isNow ? amber : isSel ? "#1d4ed8" : "var(--color-background-secondary)", transition: "all 0.12s", border: hasDl ? `1px solid #3b82f6` : "1px solid transparent" }}>
+                      <div style={{ fontSize: "12px", fontWeight: isNow || isSel ? 500 : 400, color: isNow || isSel ? "#fff" : "var(--color-text-primary)" }}>{mi+1}월</div>
+                      {hasDl && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: isNow || isSel ? "#fff" : "#3b82f6", margin: "3px auto 0" }} />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 월 뷰 — 기존 달력 */}
+            {calView === "month" && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px", textAlign: "center" }}>
+                  {["일","월","화","수","목","금","토"].map(w => (
+                    <div key={w} style={{ fontSize: "10px", color: "var(--color-text-tertiary)", padding: "2px 0", fontWeight: 500 }}>{w}</div>
+                  ))}
+                  {(() => {
+                    const firstDay = new Date(year, month, 1).getDay();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const days = [];
+                    for (let i = 0; i < firstDay; i++) days.push(null);
+                    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+                    return days.map((day, idx) => {
+                      if (!day) return <div key={`e${idx}`} />;
+                      const ds = `${year}-${pad(month+1)}-${pad(day)}`;
+                      const isToday = new Date(year, month, day).getTime() === todayD.getTime();
+                      const hasDl = dlDates.has(ds);
+                      const isSel = selectedDate === ds;
+                      return (
+                        <div key={ds} onClick={() => { setSelectedDate(isSel ? null : ds); setCalView("day"); }} style={{ padding: "4px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", cursor: "pointer" }}>
+                          <div style={{ width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "50%", fontSize: "12px", fontWeight: isToday || isSel ? 500 : 400, background: isSel ? "#1d4ed8" : isToday ? amber : "transparent", color: isSel ? "#fff" : isToday ? "#fff" : idx % 7 === 0 ? "#dc2626" : idx % 7 === 6 ? "#2563eb" : "var(--color-text-primary)", transition: "all 0.12s" }}>{day}</div>
+                          <div style={{ display: "flex", gap: "2px", alignItems: "center" }}>
+                            {hasDl && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: isSel ? "#93c5fd" : "#3b82f6" }} />}
+                            {doneDates.has(ds) && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: isSel ? "#fde68a" : amber }} />}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </>
+            )}
+
+            {/* 일 뷰 — 선택된 날 일정 */}
+            {calView === "day" && (
+              <div>
+                {!selectedDate ? (
+                  <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "8px 0" }}>월 뷰에서 날짜를 선택하세요</div>
+                ) : (() => {
+                  const dlsOnDay = d.deadlines.filter(x => {
+                    const s = (x.startDate || "").slice(0,10);
+                    const e = (x.endDate || "").slice(0,10);
+                    return s === selectedDate || e === selectedDate || (s && e && s <= selectedDate && selectedDate <= e);
+                  });
+                  const todosOnDay = d.todos.filter(x => {
+                    if (!x.doneAt) return false;
+                    const ds = new Date(x.doneAt);
+                    const pad2 = n => String(n).padStart(2,"0");
+                    return `${ds.getFullYear()}-${pad2(ds.getMonth()+1)}-${pad2(ds.getDate())}` === selectedDate;
+                  });
+                  return (
+                    <div>
+                      <div style={{ display: "flex", gap: "4px", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+                        {[-1, 0, 1].map(offset => {
+                          const [sy,sm,sd] = selectedDate.split("-").map(Number);
+                          const nd = new Date(sy,sm-1,sd+offset);
+                          const nds = `${nd.getFullYear()}-${pad(nd.getMonth()+1)}-${pad(nd.getDate())}`;
+                          const isActive = nds === selectedDate;
+                          return (
+                            <button key={offset} onClick={() => setSelectedDate(nds)} style={{ ...styles.pill(isActive), fontSize: "11px" }}>
+                              {offset === -1 ? "어제" : offset === 0 ? "오늘" : "내일"}
+                            </button>
+                          );
+                        })}
+                        <div style={{ flex: 1 }} />
+                        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ ...styles.inp, flex: "none", fontSize: "11px", width: "120px" }} />
+                      </div>
+                      <DlPanel items={dlsOnDay} />
+                      {todosOnDay.length > 0 && (
+                        <div style={{ marginTop: "0.75rem", borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: "0.75rem" }}>
+                          <div style={{ fontSize: "10px", color: amber, letterSpacing: "0.08em", fontWeight: 500, marginBottom: "6px" }}>완료한 할 일</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                            {todosOnDay.map(t => (
+                              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 10px", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: `2px solid ${amber}`, opacity: t.done ? 0.7 : 1 }}>
+                                <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: t.done ? amber : "var(--color-border-secondary)", flexShrink: 0 }} />
+                                <span style={{ fontSize: "13px", flex: 1, color: "var(--color-text-primary)", ...(t.done ? { textDecoration: "line-through", opacity: 0.7 } : {}) }}>{t.title}</span>
+                                <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>{t.done ? "완료" : "미완"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* 월 뷰에서 선택된 날 패널 */}
+            {calView === "month" && selectedDate && (() => {
+              const dlsOnDay = d.deadlines.filter(x => {
+                const s = (x.startDate || "").slice(0,10);
+                const e = (x.endDate || "").slice(0,10);
+                return s === selectedDate || e === selectedDate || (s && e && s <= selectedDate && selectedDate <= e);
+              });
+              const [sy, sm, sd] = selectedDate.split("-").map(Number);
+              const label = new Date(sy, sm-1, sd).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
+              return (
+                <div style={{ marginTop: "0.75rem", borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: "0.75rem" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: "0.5rem" }}>{label}</div>
+                  <DlPanel items={dlsOnDay} />
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
+      {/* ── EDIT MODAL ── */}
+      {editDl && (
+        <div style={{ position: "relative", minHeight: "0" }}>
+          <div style={{ ...styles.card, border: `1px solid ${amber}`, display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ ...styles.label, marginBottom: 0 }}>일정 수정</div>
+              <button onClick={() => setEditDl(null)} style={{ ...styles.xBtn, fontSize: "18px" }}>×</button>
+            </div>
+            <input
+              value={editDl.title}
+              onChange={e => setEditDl(p => ({ ...p, title: e.target.value }))}
+              style={styles.inp}
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div>
+                <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "4px" }}>시작</div>
+                <input type="date" value={(editDl.startDate || "").slice(0,10)} onChange={e => setEditDl(p => ({ ...p, startDate: makeDt(e.target.value, (p.startDate||"").slice(11,16)) }))} style={{ ...styles.inp, fontSize: "11px", flex: "none", width: "100%", boxSizing: "border-box" }} />
+                <input type="time" value={(editDl.startDate||"").length > 10 ? (editDl.startDate||"").slice(11,16) : ""} onChange={e => setEditDl(p => ({ ...p, startDate: makeDt((p.startDate||"").slice(0,10), e.target.value) }))} style={{ ...styles.inp, fontSize: "11px", flex: "none", width: "100%", boxSizing: "border-box", marginTop: "4px" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "4px" }}>종료</div>
+                <input type="date" value={(editDl.endDate || "").slice(0,10)} onChange={e => setEditDl(p => ({ ...p, endDate: makeDt(e.target.value, (p.endDate||"").slice(11,16)) }))} style={{ ...styles.inp, fontSize: "11px", flex: "none", width: "100%", boxSizing: "border-box" }} />
+                <input type="time" value={(editDl.endDate||"").length > 10 ? (editDl.endDate||"").slice(11,16) : ""} onChange={e => setEditDl(p => ({ ...p, endDate: makeDt((p.endDate||"").slice(0,10), e.target.value) }))} style={{ ...styles.inp, fontSize: "11px", flex: "none", width: "100%", boxSizing: "border-box", marginTop: "4px" }} />
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "4px" }}>메모</div>
+              <textarea
+                value={editDl.memo || ""}
+                onChange={e => setEditDl(p => ({ ...p, memo: e.target.value }))}
+                placeholder="내용 메모"
+                rows={3}
+                style={{ ...styles.inp, flex: "none", width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.6, fontSize: "12px" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button onClick={() => setEditDl(null)} style={{ ...styles.addBtn("#6b7280") }}>취소</button>
+              <button onClick={() => { updateDeadline(editDl.id, { title: editDl.title, startDate: editDl.startDate, endDate: editDl.endDate, memo: editDl.memo }); setEditDl(null); }} style={styles.addBtn(amber)}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DEADLINES ── */}
+      <div>
+        <div style={sLabel("schedule")}>일정 / 마감</div>
+        <div style={{ display: "flex", gap: "0.5rem", overflowX: "auto", paddingBottom: "4px" }}>
+          {pendingDeadlines.map((dl) => {
+            const hasDates = dl.startDate || dl.endDate;
+            const dv = dl.endDate ? dDay(dl.endDate) : null;
+            const clr = dv === null ? "var(--color-text-tertiary)" : dv < 0 ? "#dc2626" : dv <= 3 ? "#dc2626" : dv <= 7 ? amber : "var(--color-text-secondary)";
+            const borderClr = dv === null ? "var(--color-border-tertiary)" : dv <= 3 ? "rgba(220,38,38,0.35)" : dv <= 7 ? "rgba(217,119,6,0.3)" : "var(--color-border-tertiary)";
+            return (
+              <div key={dl.id} style={{ ...styles.card, flexShrink: 0, minWidth: "130px", maxWidth: "170px", borderColor: borderClr }}>
+                <div style={{ fontSize: "13px", fontWeight: 500, marginBottom: "6px", color: "var(--color-text-primary)", wordBreak: "break-word", lineHeight: 1.4 }}>
+                  {dl.title}
+                </div>
+                {hasDates ? (
+                  <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "4px", lineHeight: 1.9 }}>
+                    {dl.startDate && <div>▶ {fmtDt(dl.startDate)}</div>}
+                    {dl.endDate && <div>■ {fmtDt(dl.endDate)}</div>}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "4px" }}>일정 미정</div>
+                )}
+                {dv !== null && (
+                  <div style={{ fontSize: "20px", fontWeight: 500, color: clr, lineHeight: 1.1, marginTop: "4px" }}>
+                    {dv < 0 ? `D+${Math.abs(dv)}` : dv === 0 ? "D-DAY" : `D-${dv}`}
+                  </div>
+                )}
+                {dl.memo && (
+                  <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "6px", lineHeight: 1.6, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: "6px", wordBreak: "break-word" }}>
+                    {dl.memo}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: "4px", marginTop: "8px", alignItems: "center" }}>
+                  <button onClick={() => toggle("deadlines", dl.id)} style={{ ...styles.pill(dl.done), fontSize: "10px", padding: "2px 7px" }}>완료</button>
+                  <button onClick={() => setEditDl({ ...dl })} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
+                  <button onClick={() => remove("deadlines", dl.id)} style={{ ...styles.xBtn, fontSize: "14px" }}>×</button>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ ...sCard("schedule"), flexShrink: 0, minWidth: "180px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            <input
+              value={i("dl-t")}
+              onChange={(e) => si("dl-t", e.target.value)}
+              placeholder="일정 이름"
+              style={{ ...styles.inp, flex: "none" }}
+            />
+            <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>시작 (선택)</div>
+            <div style={{ display: "flex", gap: "4px" }}>
+              <input type="date" value={i("dl-sd")} onChange={e => si("dl-sd", e.target.value)} style={{ ...styles.inp, flex: "none", fontSize: "11px", width: "100px" }} />
+              <input type="time" value={i("dl-st")} onChange={e => si("dl-st", e.target.value)} style={{ ...styles.inp, flex: "none", fontSize: "11px", width: "70px" }} />
+            </div>
+            <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>종료 (선택)</div>
+            <div style={{ display: "flex", gap: "4px" }}>
+              <input type="date" value={i("dl-ed")} onChange={e => si("dl-ed", e.target.value)} style={{ ...styles.inp, flex: "none", fontSize: "11px", width: "100px" }} />
+              <input type="time" value={i("dl-et")} onChange={e => si("dl-et", e.target.value)} style={{ ...styles.inp, flex: "none", fontSize: "11px", width: "70px" }} />
+            </div>
+            <textarea
+              value={i("dl-m")}
+              onChange={e => si("dl-m", e.target.value)}
+              placeholder="메모 (선택)"
+              rows={2}
+              style={{ ...styles.inp, flex: "none", resize: "vertical", lineHeight: 1.6, fontSize: "11px" }}
+            />
+            <button
+              onClick={() => {
+                if (!i("dl-t")) return;
+                submit("dl-t", () => add("deadlines", { id: uid(), title: i("dl-t"), startDate: makeDt(i("dl-sd"), i("dl-st")), endDate: makeDt(i("dl-ed"), i("dl-et")), memo: i("dl-m") || "", done: false }), ["dl-t", "dl-sd", "dl-st", "dl-ed", "dl-et", "dl-m"]);
+              }}
+              style={styles.addBtn(amber)}
+            >
+              + 추가
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MAIN GRID ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.75rem" }}>
+
+        {/* TODOS */}
+        <div style={sCard("todo")}>
+          <div style={sLabel("todo")}>오늘 할 일</div>
+          {todayDeadlines.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "0.625rem", paddingBottom: "0.625rem", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
+              {todayDeadlines.map(dl => {
+                const dv = dl.endDate ? dDay(dl.endDate) : null;
+                const isEnd = dl.endDate && dl.endDate.slice(0,10) === today;
+                const clr = isEnd && dv !== null && dv <= 0 ? "#dc2626" : "#3b82f6";
+                return (
+                  <div key={dl.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => toggle("deadlines", dl.id)}
+                      style={{
+                        fontSize: "10px", padding: "2px 8px", borderRadius: "999px", cursor: "pointer", fontWeight: 500,
+                        border: `1.5px solid ${dl.done ? "#3b82f6" : clr}`,
+                        background: dl.done ? "#3b82f6" : "transparent",
+                        color: dl.done ? "#fff" : clr,
+                        transition: "all 0.15s", flexShrink: 0, minWidth: "36px", textAlign: "center",
+                      }}
+                    >
+                      {dl.done ? "완료" : "일정"}
+                    </button>
+                    <span style={{
+                      fontSize: "13px", flex: 1,
+                      color: dl.done ? "var(--color-text-tertiary)" : "var(--color-text-primary)",
+                      textDecoration: dl.done ? "line-through" : "none",
+                      opacity: dl.done ? 0.5 : 1,
+                    }}>
+                      {dl.title}
+                      <span style={{ display: "block", fontSize: "10px", color: "var(--color-text-tertiary)", marginTop: "1px", textDecoration: "none" }}>
+                        {isEnd ? (dv === 0 ? "오늘 마감" : dv < 0 ? `마감 ${Math.abs(dv)}일 지남` : `D-${dv}`) : "진행 중"}
+                        {dl.endDate && dl.endDate.length > 10 && ` · ${fmtDt(dl.endDate)}`}
+                      </span>
+                    </span>
+                    <button type="button" onClick={() => setEditDl({ ...dl })} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "0.75rem" }}>
+            {d.todos.length === 0 && (
+              <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "8px 0" }}>비어 있음</div>
+            )}
+            {d.todos.map((todo) => (
+              <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => toggleTodo(todo.id)}
+                  style={{
+                    fontSize: "10px", padding: "2px 8px", borderRadius: "999px", cursor: "pointer", fontWeight: 500,
+                    border: `1.5px solid ${todo.done ? amber : todo.urgent ? "#dc2626" : amber}`,
+                    background: todo.done ? amber : "transparent",
+                    color: todo.done ? "#fff" : todo.urgent ? "#dc2626" : amber,
+                    transition: "all 0.15s", flexShrink: 0, minWidth: "36px", textAlign: "center",
+                  }}
+                >
+                  {todo.done ? "완료" : "　할일　"}
+                </button>
+                <span style={{
+                  fontSize: "13px", flex: 1,
+                  color: todo.done ? "var(--color-text-tertiary)" : todo.urgent ? "#dc2626" : "var(--color-text-primary)",
+                  textDecoration: todo.done ? "line-through" : "none",
+                  opacity: todo.done ? 0.5 : 1,
+                }}>
+                  {todo.title}
+                  {!todo.done && todo.ts && (
+                    <span style={{ display: "block", fontSize: "10px", color: "var(--color-text-tertiary)", marginTop: "1px", fontFamily: "var(--font-mono)" }}>{fmtTs(todo.ts)}</span>
+                  )}
+                  {todo.done && todo.doneAt && (
+                    <span style={{ display: "block", fontSize: "10px", color: "var(--color-text-tertiary)", marginTop: "1px", fontFamily: "var(--font-mono)", textDecoration: "none" }}>{fmtTs(todo.doneAt)} 완료</span>
+                  )}
+                </span>
+                <button onClick={() => remove("todos", todo.id)} style={styles.xBtn}>×</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <input
+              value={i("todo")}
+              onChange={(e) => si("todo", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && i("todo"))
+                  submit("todo", () => add("todos", { id: uid(), title: i("todo"), done: false, urgent: i("todo-u") === "1", ts: Date.now() }), ["todo", "todo-u"]);
+              }}
+              placeholder="새 할 일 (Enter)"
+              style={styles.inp}
+            />
+            <button
+              onClick={() => si("todo-u", i("todo-u") === "1" ? "" : "1")}
+              title="긴급"
+              style={{
+                ...styles.pill(i("todo-u") === "1"),
+                background: i("todo-u") === "1" ? "#dc2626" : "transparent",
+                border: `0.5px solid ${i("todo-u") === "1" ? "#dc2626" : "var(--color-border-secondary)"}`,
+                color: i("todo-u") === "1" ? "#fff" : "var(--color-text-secondary)",
+                padding: "5px 8px",
+                fontSize: "12px",
+              }}
+            >
+              !
+            </button>
+            <button
+              onClick={() => {
+                if (!i("todo")) return;
+                submit("todo", () => add("todos", { id: uid(), title: i("todo"), done: false, urgent: i("todo-u") === "1", ts: Date.now() }), ["todo", "todo-u"]);
+              }}
+              style={styles.addBtn()}
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* GOALS */}
+        <div style={sCard("goal")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+            <div style={{ ...sLabel("goal"), marginBottom: 0 }}>목표</div>
+            <div style={{ display: "flex", gap: "4px" }}>
+              {[["short", "단기"], ["mid", "중기"], ["long", "장기"]].map(([k, label]) => (
+                <button key={k} onClick={() => setGoalTab(k)} style={styles.pill(goalTab === k)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "0.5rem" }}>
+            {goalTab === "short" ? "이번 주" : goalTab === "mid" ? "이번 달 / 분기" : "올해 / 장기"}
+          </div>
+          {goalTab === "short" && todayDeadlines.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "0.625rem", paddingBottom: "0.625rem", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
+              {todayDeadlines.map(dl => (
+                <div key={dl.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: amber, flexShrink: 0 }} />
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", flex: 1 }}>{dl.title}</span>
+                  <span style={{ fontSize: "10px", color: amber }}>오늘</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px", minHeight: "60px", marginBottom: "0.75rem" }}>
+            {(d.goals[goalTab] || []).map((g) => (
+              <div key={g.id} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div onClick={() => toggleGoal(goalTab, g.id)} style={styles.checkbox(g.done, "circle")} />
+                <span
+                  style={{
+                    fontSize: "13px",
+                    flex: 1,
+                    color: "var(--color-text-primary)",
+                    ...(g.done ? { textDecoration: "line-through", opacity: 0.38 } : {}),
+                  }}
+                >
+                  {g.title}
+                </span>
+                <button onClick={() => removeGoal(goalTab, g.id)} style={styles.xBtn}>×</button>
+              </div>
+            ))}
+            {(d.goals[goalTab] || []).length === 0 && (
+              <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "8px 0" }}>비어 있음</div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <input
+              value={i(`g-${goalTab}`)}
+              onChange={(e) => si(`g-${goalTab}`, e.target.value)}
+              onKeyDown={(e) => {
+                const k = `g-${goalTab}`;
+                if (e.key === "Enter" && i(k)) submit(k, () => addGoal(goalTab, i(k)));
+              }}
+              placeholder={`${goalTab === "short" ? "이번 주" : goalTab === "mid" ? "이번 달" : "올해"} 목표 추가`}
+              style={styles.inp}
+            />
+            <button
+              onClick={() => {
+                const k = `g-${goalTab}`;
+                if (!i(k)) return;
+                submit(k, () => addGoal(goalTab, i(k)));
+              }}
+              style={styles.addBtn()}
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── BOTTOM GRID ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.75rem" }}>
+
+        {/* ROUTINES */}
+        <div style={sCard("routine")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+            <div style={{ ...sLabel("routine"), marginBottom: 0 }}>루틴 & 건강 관리</div>
+            <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>{routineDone}/{d.routines.length}</div>
+          </div>
+          {d.routines.length > 0 && (
+            <div style={{ height: "3px", background: "var(--color-background-secondary)", borderRadius: "999px", marginBottom: "0.625rem", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${d.routines.length ? (routineDone / d.routines.length) * 100 : 0}%`, background: "#8b5cf6", borderRadius: "999px", transition: "width 0.3s" }} />
+            </div>
+          )}
+
+          {/* 반복 루틴 */}
+          {routineRepeat.length > 0 && (
+            <div style={{ marginBottom: "0.625rem" }}>
+              <div style={{ fontSize: "10px", color: "#7c3aed", letterSpacing: "0.08em", marginBottom: "5px", fontWeight: 500 }}>반복 ↺</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                {routineRepeat.map((r) => (
+                  <div key={r.id}>
+                    {editRoutine === r.id ? (
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input autoFocus value={editRoutineData.title || ""}
+                          onChange={e => setEditRoutineData(p => ({ ...p, title: e.target.value }))}
+                          style={{ ...styles.inp, fontSize: "12px" }}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") { const v = (editRoutineData.title||"").trim(); if (v) upd("routines", d.routines.map(x => x.id === r.id ? { ...x, title: v } : x)); setEditRoutine(null); setEditRoutineData({}); }
+                            if (e.key === "Escape") { setEditRoutine(null); setEditRoutineData({}); }
+                          }} />
+                        <button type="button" onClick={() => { const v = (editRoutineData.title||"").trim(); if (v) upd("routines", d.routines.map(x => x.id === r.id ? { ...x, title: v } : x)); setEditRoutine(null); setEditRoutineData({}); }} style={styles.addBtn("#8b5cf6")}>저장</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button type="button" onClick={() => toggle("routines", r.id)} style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "999px", cursor: "pointer", fontWeight: 500, border: "1.5px solid #8b5cf6", background: r.done ? "#8b5cf6" : "transparent", color: r.done ? "#fff" : "#8b5cf6", transition: "all 0.15s", flexShrink: 0 }}>
+                          {r.done ? "완료" : "　　"}
+                        </button>
+                        <span style={{ fontSize: "13px", flex: 1, color: "var(--color-text-primary)", ...(r.done ? { opacity: 0.38, textDecoration: "line-through" } : {}) }}>{r.title}</span>
+                        <button type="button" onClick={() => { setEditRoutine(r.id); setEditRoutineData({ title: r.title }); }} style={{ ...styles.xBtn, fontSize: "13px", color: "#8b5cf6" }}>✎</button>
+                        <button type="button" onClick={() => remove("routines", r.id)} style={styles.xBtn}>×</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 금일 루틴 */}
+          {routineToday.length > 0 && (
+            <div style={{ marginBottom: "0.625rem", paddingTop: routineRepeat.length > 0 ? "0.5rem" : 0, borderTop: routineRepeat.length > 0 ? "0.5px solid var(--color-border-tertiary)" : "none" }}>
+              <div style={{ fontSize: "10px", color: "#0891b2", letterSpacing: "0.08em", marginBottom: "5px", fontWeight: 500 }}>오늘만 — 내일 사라짐</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                {routineToday.map((r) => (
+                  <div key={r.id}>
+                    {editRoutine === r.id ? (
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input autoFocus value={editRoutineData.title || ""}
+                          onChange={e => setEditRoutineData(p => ({ ...p, title: e.target.value }))}
+                          style={{ ...styles.inp, fontSize: "12px" }}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") { const v = (editRoutineData.title||"").trim(); if (v) upd("routines", d.routines.map(x => x.id === r.id ? { ...x, title: v } : x)); setEditRoutine(null); setEditRoutineData({}); }
+                            if (e.key === "Escape") { setEditRoutine(null); setEditRoutineData({}); }
+                          }} />
+                        <button type="button" onClick={() => { const v = (editRoutineData.title||"").trim(); if (v) upd("routines", d.routines.map(x => x.id === r.id ? { ...x, title: v } : x)); setEditRoutine(null); setEditRoutineData({}); }} style={styles.addBtn("#0891b2")}>저장</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button type="button" onClick={() => toggle("routines", r.id)} style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "999px", cursor: "pointer", fontWeight: 500, border: "1.5px solid #0891b2", background: r.done ? "#0891b2" : "transparent", color: r.done ? "#fff" : "#0891b2", transition: "all 0.15s", flexShrink: 0 }}>
+                          {r.done ? "완료" : "　　"}
+                        </button>
+                        <span style={{ fontSize: "13px", flex: 1, color: "var(--color-text-primary)", ...(r.done ? { opacity: 0.38, textDecoration: "line-through" } : {}) }}>{r.title}</span>
+                        <button type="button" onClick={() => { setEditRoutine(r.id); setEditRoutineData({ title: r.title }); }} style={{ ...styles.xBtn, fontSize: "13px", color: "#0891b2" }}>✎</button>
+                        <button type="button" onClick={() => remove("routines", r.id)} style={styles.xBtn}>×</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {d.routines.length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "8px 0" }}>루틴을 추가해보세요</div>
+          )}
+
+          {/* 입력 */}
+          <div style={{ display: "flex", gap: "6px", marginTop: "0.25rem" }}>
+            <input
+              value={i("routine")}
+              onChange={(e) => si("routine", e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && i("routine"))
+                  submit("routine", () => add("routines", { id: uid(), title: i("routine"), done: false, type: i("routine-type") || "repeat" }));
+              }}
+              placeholder="루틴 추가..."
+              style={styles.inp}
+            />
+            <button
+              onClick={() => si("routine-type", i("routine-type") === "today" ? "repeat" : "today")}
+              style={{
+                fontSize: "11px", padding: "5px 8px", cursor: "pointer", borderRadius: "var(--border-radius-md)", flexShrink: 0, fontWeight: 500, transition: "all 0.12s",
+                background: i("routine-type") === "today" ? "#0891b2" : "#8b5cf6",
+                color: "#fff", border: "none",
+              }}
+            >
+              {i("routine-type") === "today" ? "오늘" : "반복"}
+            </button>
+            <button
+              onClick={() => {
+                if (!i("routine")) return;
+                submit("routine", () => add("routines", { id: uid(), title: i("routine"), done: false, type: i("routine-type") || "repeat" }), ["routine", "routine-type"]);
+              }}
+              style={styles.addBtn("#8b5cf6")}
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── IMPULSE LOCK ── */}
+      <div style={sCard("impulse")}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+          <div style={{ ...sLabel("impulse"), marginBottom: 0 }}>충동적인 계획 & 행동 잠그기</div>
+          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>24h 쿨다운</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "0.75rem" }}>
+          {d.impulse.map((item) => {
+            const hoursLeft = Math.max(0, Math.ceil((item.unlockAt - Date.now()) / 36e5));
+            const daysLeft = Math.ceil(hoursLeft / 24);
+            const unlocked = Date.now() >= item.unlockAt;
+            const totalMs = item.unlockAt - item.lockedAt;
+            const progress = Math.min(100, Math.round(((Date.now() - item.lockedAt) / totalMs) * 100));
+            return (
+              <div key={item.id} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: `2px solid ${unlocked ? green : "#6b7280"}`, overflow: "hidden" }}>
+                {editImpulse === item.id ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px" }}>
+                    <input autoFocus value={editImpulseData.title || ""}
+                      onChange={e => setEditImpulseData(p => ({ ...p, title: e.target.value }))}
+                      style={{ ...styles.inp, fontSize: "12px" }}
+                      onKeyDown={e => { if (e.key === "Escape") { setEditImpulse(null); setEditImpulseData({}); } }} />
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>시간 재설정</span>
+                      <select value={editImpulseData.hours || "0"}
+                        onChange={e => setEditImpulseData(p => ({ ...p, hours: e.target.value }))}
+                        style={{ ...styles.inp, flex: "none", width: "72px", fontSize: "11px", cursor: "pointer" }}>
+                        <option value="0">유지</option>
+                        {[["1h","1"],["6h","6"],["12h","12"],["24h","24"],["2일","48"],["3일","72"],["1주","168"]].map(([l,v]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <button type="button" onClick={() => {
+                        const val = (editImpulseData.title || "").trim();
+                        const hrs = parseInt(editImpulseData.hours || "0", 10);
+                        if (val) { const p = { title: val }; if (hrs > 0) { p.lockedAt = Date.now(); p.unlockAt = Date.now() + hrs*36e5; p.lockLabel = hrs >= 24 ? Math.round(hrs/24)+"일" : hrs+"h"; } upd("impulse", d.impulse.map(x => x.id === item.id ? { ...x, ...p } : x)); }
+                        setEditImpulse(null); setEditImpulseData({});
+                      }} style={styles.addBtn("#6b7280")}>저장</button>
+                      <button type="button" onClick={() => { setEditImpulse(null); setEditImpulseData({}); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "8px 10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                      <span style={{ fontSize: "13px", color: "var(--color-text-primary)", flex: 1 }}>{item.title}</span>
+                      <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>{item.lockLabel || "24h"}</span>
+                      <button type="button" onClick={() => { setEditImpulse(item.id); setEditImpulseData({ title: item.title, hours: "0" }); }} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
+                      <button type="button" onClick={() => remove("impulse", item.id)} style={styles.xBtn}>×</button>
+                    </div>
+                    {!unlocked && (
+                      <div style={{ height: "3px", background: "var(--color-border-tertiary)", borderRadius: "999px", margin: "6px 0 4px", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${progress}%`, background: "#6b7280", borderRadius: "999px", transition: "width 1s" }} />
+                      </div>
+                    )}
+                    <div style={{ fontSize: "11px", color: unlocked ? green : "var(--color-text-secondary)", marginTop: unlocked ? "4px" : "0" }}>
+                      {unlocked ? "언락 — 이제도 하고 싶어?" : hoursLeft < 24 ? `${hoursLeft}시간 후 언락` : `${daysLeft}일 ${hoursLeft % 24}시간 후 언락`}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {d.impulse.length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "8px 0" }}>충동적으로 벌이고 싶은 계획이나 행동을 잠근다</div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <input value={i("impulse")} onChange={e => si("impulse", e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && i("impulse")) {
+                const hrs = parseInt(i("imp-h") || "24");
+                submit("impulse", () => add("impulse", { id: uid(), title: i("impulse"), lockedAt: Date.now(), unlockAt: Date.now() + hrs*36e5, lockLabel: hrs >= 24 ? Math.round(hrs/24)+"일" : hrs+"h" }), ["impulse", "imp-h"]);
+              }
+            }}
+            placeholder="일 벌리기 전에 잠그기" style={styles.inp} />
+          <select value={i("imp-h") || "24"} onChange={e => si("imp-h", e.target.value)} style={{ ...styles.inp, flex: "none", width: "72px", cursor: "pointer" }}>
+            {[["1h","1"],["6h","6"],["12h","12"],["24h","24"],["2일","48"],["3일","72"],["1주","168"]].map(([label, val]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+          <button type="button" onClick={() => {
+            if (!i("impulse")) return;
+            const hrs = parseInt(i("imp-h") || "24");
+            submit("impulse", () => add("impulse", { id: uid(), title: i("impulse"), lockedAt: Date.now(), unlockAt: Date.now() + hrs*36e5, lockLabel: hrs >= 24 ? Math.round(hrs/24)+"일" : hrs+"h" }), ["impulse", "imp-h"]);
+          }} style={{ ...styles.addBtn("#6b7280") }}>lock</button>
+        </div>
+      </div>
+
+      {/* ── STUDY KEYWORDS ── */}
+      <div style={sCard("study")}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+          <div style={{ ...sLabel("study"), marginBottom: 0 }}>공부 / 리서치 킵</div>
+          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>{(d.studyKw || []).length}개</div>
+        </div>
+
+        {/* 리스트 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "0.75rem", maxHeight: "260px", overflowY: "auto" }}>
+          {(d.studyKw || []).length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "4px 0" }}>논문, 개념, 아이디어를 출처와 함께 킵</div>
+          )}
+          {(d.studyKw || []).map((kw) => (
+            <div key={kw.id} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: `2px solid ${amber}`, overflow: "hidden" }}>
+              {i("kw-edit") === kw.id ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px" }}>
+                  <input autoFocus value={i("kw-e-src")} onChange={e => si("kw-e-src", e.target.value)} placeholder="출처" style={{ ...styles.inp, fontSize: "11px" }} />
+                  <textarea value={i("kw-e-con")} onChange={e => si("kw-e-con", e.target.value)} placeholder="내용" rows={3}
+                    style={{ ...styles.inp, fontSize: "11px", resize: "vertical", lineHeight: 1.6, flex: "none" }} />
+                  <input value={i("kw-e-tag")} onChange={e => si("kw-e-tag", e.target.value)} placeholder="태그 (선택)" style={{ ...styles.inp, fontSize: "11px" }} />
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    <button type="button" onClick={() => { si("kw-edit", ""); si("kw-e-src",""); si("kw-e-con",""); si("kw-e-tag",""); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+                    <button type="button" onClick={() => {
+                      const src = i("kw-e-src").trim(); const con = i("kw-e-con").trim(); const tag = i("kw-e-tag").trim();
+                      upd("studyKw", (d.studyKw||[]).map(x => x.id === kw.id ? { ...x, source: src, content: con, tag, text: tag || con || src } : x));
+                      si("kw-edit",""); si("kw-e-src",""); si("kw-e-con",""); si("kw-e-tag","");
+                    }} style={styles.addBtn(amber)}>저장</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "8px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: kw.content ? "5px" : 0 }}>
+                    {kw.tag && <span style={{ fontSize: "10px", padding: "1px 7px", borderRadius: "999px", background: amber, color: "#fff", flexShrink: 0, fontWeight: 500 }}>{kw.tag}</span>}
+                    <div style={{ flex: 1 }}>
+                      {kw.source && <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "3px" }}>출처: {kw.source}</div>}
+                      {(kw.content || kw.text) && <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.6, wordBreak: "break-word" }}>{kw.content || kw.text}</div>}
+                    </div>
+                    <button type="button" onClick={() => { si("kw-edit", kw.id); si("kw-e-src", kw.source||""); si("kw-e-con", kw.content||kw.text||""); si("kw-e-tag", kw.tag||""); }} style={{ ...styles.xBtn, fontSize: "13px", color: amber, flexShrink: 0 }}>✎</button>
+                    <button type="button" onClick={() => upd("studyKw", (d.studyKw||[]).filter(x => x.id !== kw.id))} style={{ ...styles.xBtn, flexShrink: 0 }}>×</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* 새 항목 추가 */}
+        {i("kw-adding") === "1" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "10px", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${amber}` }}>
+            <input value={i("kw-src")} onChange={e => si("kw-src", e.target.value)} placeholder="출처 (선택)" style={{ ...styles.inp, fontSize: "11px" }} />
+            <textarea value={i("kw-con")} onChange={e => si("kw-con", e.target.value)} placeholder="내용 *" rows={3}
+              style={{ ...styles.inp, fontSize: "11px", resize: "vertical", lineHeight: 1.6, flex: "none" }} />
+            <input value={i("kw-tag")} onChange={e => si("kw-tag", e.target.value)} placeholder="태그 (선택)" style={{ ...styles.inp, fontSize: "11px" }}
+              onKeyDown={e => { if (e.key === "Escape") { si("kw-adding", ""); si("kw-src",""); si("kw-con",""); si("kw-tag",""); } }} />
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => { si("kw-adding",""); si("kw-src",""); si("kw-con",""); si("kw-tag",""); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+              <button type="button" onClick={() => {
+                if (!i("kw-con") && !i("kw-src")) return;
+                upd("studyKw", [...(d.studyKw||[]), { id: uid(), source: i("kw-src"), content: i("kw-con"), tag: i("kw-tag"), text: i("kw-tag") || i("kw-con") || i("kw-src") }]);
+                si("kw-adding",""); si("kw-src",""); si("kw-con",""); si("kw-tag","");
+              }} style={styles.addBtn(amber)}>저장</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => si("kw-adding", "1")}
+            style={{ width: "100%", padding: "7px", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-mono)", background: "transparent", color: amber, border: `1px dashed ${amber}`, borderRadius: "var(--border-radius-md)", fontWeight: 500 }}>
+            + 새 항목 추가
+          </button>
+        )}
+      </div>
+
+      {/* ── EXPORT ── */}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "0.5rem" }}>
+
+        {/* 인쇄/PDF 버튼 */}
+        <button
+          type="button"
+          onClick={() => {
+            const pad = n => String(n).padStart(2,"0");
+            const now = new Date();
+            const dateStr = now.getFullYear()+"."+pad(now.getMonth()+1)+"."+pad(now.getDate())+" "+pad(now.getHours())+":"+pad(now.getMinutes());
+            const q = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            const pill = (done, label, color) => {
+              const c = color || "#d97706";
+              return done
+                ? '<span style="font-size:10px;padding:1px 7px;border-radius:999px;border:1.5px solid '+c+';background:'+c+';color:#fff;white-space:nowrap">완료</span>'
+                : '<span style="font-size:10px;padding:1px 7px;border-radius:999px;border:1.5px solid '+c+';color:'+c+';white-space:nowrap">'+label+'</span>';
+            };
+            const row = (done, pillHtml, title, meta) =>
+              '<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:0.5px solid #f3f4f6">'
+              +pillHtml
+              +'<span style="flex:1;line-height:1.6;'+(done?"text-decoration:line-through;opacity:0.45":"")+'">'+(title||"")+'</span>'
+              +(meta?'<span style="font-size:10px;color:#9ca3af">'+meta+'</span>':"")
+              +'</div>';
+            const sec = (title, rows) =>
+              '<div style="page-break-inside:avoid;margin-bottom:28px">'
+              +'<div style="font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#888;border-bottom:1.5px solid #e5e7eb;padding-bottom:4px;margin-bottom:10px">'+title+'</div>'
+              +(rows.length ? rows.join("") : '<div style="color:#bbb;font-size:12px">없음</div>')
+              +'</div>';
+
+            const dlRows = d.deadlines.map(x =>
+              row(x.done, pill(x.done,"○"), q(x.title),
+                (x.startDate?"▶ "+fmtDt(x.startDate)+" ":"")+
+                (x.endDate?"■ "+fmtDt(x.endDate):"")
+              ));
+            const todoRows = d.todos.map(x =>
+              row(x.done, pill(x.done,"○"), (x.urgent?"🔴 ":"")+q(x.title),
+                x.doneAt ? fmtTs(x.doneAt)+" 완료" : ""));
+            const goalRows = ["short","mid","long"].flatMap(tier =>
+              (d.goals[tier]||[]).map(x =>
+                row(x.done, pill(x.done,"○","#0d9488"), "["+{short:"단기",mid:"중기",long:"장기"}[tier]+"] "+q(x.title))));
+            const routineRows = d.routines.map(x => {
+              const c = x.type==="today" ? "#0891b2" : "#8b5cf6";
+              return row(x.done, pill(x.done, x.type==="today"?"오늘":"반복", c), q(x.title));
+            });
+            const healthRows = d.health.map(x => row(x.done, pill(x.done,"○","#16a34a"), q(x.title)));
+            const memoRows = d.quickNotes.map(x => row(false,'','· '+q(x.text)));
+            const kwRows = (d.studyKw||[]).map(x => row(false,'','# '+q(x.text)));
+            const impulseRows = d.impulse.map(x => {
+              const unlocked = Date.now() >= x.unlockAt;
+              return row(false, pill(unlocked,"잠김", unlocked?"#16a34a":"#6b7280"), q(x.title), x.lockLabel||"24h");
+            });
+
+            const html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>플래너 "+dateStr+"</title>"
+              +"<style>body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;font-size:13px;color:#111;padding:24px;max-width:720px;margin:0 auto}"
+              +"h1{font-size:16px;font-weight:600;margin-bottom:4px}"
+              +"@media print{body{padding:0}}"
+              +"</style></head><body>"
+              +"<h1>ADHD 플래너</h1>"
+              +"<div style='font-size:11px;color:#888;margin-bottom:24px'>"+dateStr+" 출력</div>"
+              +sec("일정 / 마감", dlRows)
+              +sec("오늘 할 일", todoRows)
+              +sec("목표", goalRows)
+              +sec("루틴", routineRows)
+              +sec("건강 기록", healthRows)
+              +sec("퀵메모", memoRows)
+              +sec("공부 키워드", kwRows)
+              +sec("충동 락", impulseRows)
+              +"</body></html>";
+
+            const blob = new Blob([html], {type: "text/html;charset=utf-8"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.target = "_blank"; a.rel = "noopener";
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 3000);
+          }}
+          style={{ fontSize: "12px", padding: "7px 18px", cursor: "pointer", fontFamily: "var(--font-mono)", background: "var(--color-background-secondary)", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", fontWeight: 500 }}
+        >
+          인쇄 / PDF
+        </button>
+
+        {/* 클립보드 복사 버튼 */}
+        <button
+          type="button"
+          onClick={() => {
+            const pad = n => String(n).padStart(2,"0");
+            const now = new Date();
+            const dateStr = now.getFullYear()+"."+pad(now.getMonth()+1)+"."+pad(now.getDate())+" "+pad(now.getHours())+":"+pad(now.getMinutes());
+            const lines = [];
+            lines.push("ADHD 플래너 내보내기 — "+dateStr);
+            lines.push("=".repeat(40));
+            lines.push("\n[일정 / 마감]");
+            d.deadlines.forEach(x => {
+              lines.push((x.done?"✓":"○")+" "+x.title);
+              if (x.startDate) lines.push("   시작: "+fmtDt(x.startDate));
+              if (x.endDate) lines.push("   종료: "+fmtDt(x.endDate));
+              if (x.memo) lines.push("   메모: "+x.memo);
+            });
+            if (!d.deadlines.length) lines.push("  (없음)");
+            lines.push("\n[오늘 할 일]");
+            d.todos.forEach(x => lines.push((x.done?"✓":"○")+" "+(x.urgent?"[긴급] ":"")+x.title));
+            if (!d.todos.length) lines.push("  (없음)");
+            lines.push("\n[목표]");
+            ["short","mid","long"].forEach(tier => {
+              (d.goals[tier]||[]).forEach(x => lines.push((x.done?"✓":"○")+" [{short:'단기',mid:'중기',long:'장기'}[tier]] "+x.title));
+            });
+            lines.push("\n[루틴]");
+            d.routines.forEach(x => lines.push((x.done?"✓":"○")+" ["+(x.type==="today"?"오늘":"반복")+"] "+x.title));
+            if (!d.routines.length) lines.push("  (없음)");
+            lines.push("\n[건강 기록]");
+            d.health.forEach(x => lines.push((x.done?"✓":"○")+" "+x.title));
+            lines.push("\n[퀵메모]");
+            d.quickNotes.forEach(x => lines.push("· "+x.text));
+            lines.push("\n[공부 키워드]");
+            (d.studyKw||[]).forEach(x => lines.push("# "+x.text));
+            lines.push("\n[충동 락]");
+            d.impulse.forEach(x => lines.push("["+(Date.now()>=x.unlockAt?"언락":"잠김")+"] "+x.title+" ("+(x.lockLabel||"24h")+")"));
+            const text = lines.join("\n");
+            if (!navigator.clipboard) { si("export-text", text); return; }
+            navigator.clipboard.writeText(text).then(() => {
+              si("export-copied","1");
+              setTimeout(() => si("export-copied",""), 2500);
+            }).catch(() => si("export-text", text));
+          }}
+          style={{ fontSize: "12px", padding: "7px 18px", cursor: "pointer", fontFamily: "var(--font-mono)", background: i("export-copied") ? green : "var(--color-background-secondary)", color: i("export-copied") ? "#fff" : "var(--color-text-secondary)", border: "0.5px solid "+(i("export-copied") ? green : "var(--color-border-secondary)"), borderRadius: "var(--border-radius-md)", fontWeight: 500, transition: "all 0.2s" }}
+        >
+          {i("export-copied") ? "복사됨 ✓" : "클립보드 복사"}
+        </button>
+      </div>
+
+      {i("export-text") && (
+        <div style={{ ...sCard("study"), marginTop: "0.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <div style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>전체 선택 후 복사 (Ctrl+A → Ctrl+C)</div>
+            <button type="button" onClick={() => si("export-text", "")} style={styles.xBtn}>×</button>
+          </div>
+          <textarea readOnly value={i("export-text")} onClick={e => e.target.select()} rows={12}
+            style={{ ...styles.inp, flex: "none", width: "100%", boxSizing: "border-box", resize: "vertical", fontSize: "11px", lineHeight: 1.7 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(React.createElement(App));
+  </script>
+</body>
+</html>
