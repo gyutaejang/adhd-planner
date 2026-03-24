@@ -20,14 +20,14 @@
       --color-border-tertiary: rgba(0,0,0,0.12);
       --color-border-secondary: rgba(0,0,0,0.25);
       --color-border-primary: rgba(0,0,0,0.35);
-      --font-mono: 'Menlo', 'Monaco', 'Consolas', monospace;
+      --font-mono: 'Menlo','Monaco','Consolas',monospace;
       --font-sans: system-ui, sans-serif;
       --border-radius-md: 8px;
       --border-radius-lg: 12px;
       --border-radius-xl: 16px;
     }
     @media (prefers-color-scheme: dark) {
-      body { background: #1a1a1a; color: #f0f0f0; }
+      body { background: #1a1a1a; }
       :root {
         --color-background-primary: #1e1e1e;
         --color-background-secondary: #2a2a2a;
@@ -40,19 +40,13 @@
         --color-border-primary: rgba(255,255,255,0.3);
       }
     }
-    input, select, textarea, button {
-      font-family: var(--font-mono);
-      outline: none;
-    }
-    input[type="date"], input[type="time"], input[type="datetime-local"] {
-      color-scheme: light dark;
-    }
+    input, select, textarea, button { font-family: var(--font-mono); outline: none; }
+    input[type="date"], input[type="time"] { color-scheme: light dark; }
   </style>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" data-presets="react" data-plugins="transform-modules-umd">
-import { useState, useEffect, useCallback, useMemo } from "react";
+  <script type="text/babel">
 
 // ── Firebase 설정 ──
 const FB_CONFIG = {
@@ -261,26 +255,26 @@ const styles = {
 };
 
 export default function App() {
-  const [d, setD] = useState(INIT);
-  const [ready, setReady] = useState(false);
-  const [user, setUser] = useState(null);       // 로그인 사용자
-  const [authLoading, setAuthLoading] = useState(true); // 인증 확인 중
-  const [goalTab, setGoalTab] = useState("short");
-  const [inp, setInp] = useState({});
-  const [editDl, setEditDl] = useState(null);
+  const [d, setD] = React.useState(INIT);
+  const [ready, setReady] = React.useState(false);
+  const [user, setUser] = React.useState(null);       // 로그인 사용자
+  const [authLoading, setAuthLoading] = React.useState(true); // 인증 확인 중
+  const [goalTab, setGoalTab] = React.useState("short");
+  const [inp, setInp] = React.useState({});
+  const [editDl, setEditDl] = React.useState(null);
   const _now = new Date();
-  const [calMonth, setCalMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() });
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [calView, setCalView] = useState("month");
-  const [editImpulse, setEditImpulse] = useState(null);
-  const [editRoutine, setEditRoutine] = useState(null);
-  const [editRoutineData, setEditRoutineData] = useState({});
-  const [editImpulseData, setEditImpulseData] = useState({});
-  const [clock, setClock] = useState(new Date());
-  useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
+  const [calMonth, setCalMonth] = React.useState({ year: _now.getFullYear(), month: _now.getMonth() });
+  const [selectedDate, setSelectedDate] = React.useState(null);
+  const [calView, setCalView] = React.useState("month");
+  const [editImpulse, setEditImpulse] = React.useState(null);
+  const [editRoutine, setEditRoutine] = React.useState(null);
+  const [editRoutineData, setEditRoutineData] = React.useState({});
+  const [editImpulseData, setEditImpulseData] = React.useState({});
+  const [clock, setClock] = React.useState(new Date());
+  React.useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
 
   // ── 인증 상태 감지 ──
-  useEffect(() => {
+  React.useEffect(() => {
     getFB().then(({ auth, onAuthStateChanged }) => {
       const unsub = onAuthStateChanged(auth, (u) => {
         setUser(u);
@@ -291,7 +285,7 @@ export default function App() {
   }, []);
 
   // ── 로그인 후 데이터 로드 ──
-  useEffect(() => {
+  React.useEffect(() => {
     if (!user) return;
     S.get("adhd-v2", user.uid).then((v) => {
       if (v) {
@@ -331,15 +325,15 @@ export default function App() {
     });
   }, [user]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (ready && user) S.set("adhd-v2", d, user.uid);
   }, [d, ready, user]);
 
-  const upd = useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
-  const add = useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
-  const remove = useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
-  const toggle = useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) })), []);
-  const toggleTodo = useCallback((id) => {
+  const upd = React.useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
+  const add = React.useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
+  const remove = React.useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
+  const toggle = React.useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) })), []);
+  const toggleTodo = React.useCallback((id) => {
     setD((p) => ({
       ...p,
       todos: p.todos.map((x) => {
@@ -349,11 +343,11 @@ export default function App() {
       }),
     }));
   }, []);
-  const toggleGoal = useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) } })), []);
-  const removeGoal = useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter((x) => x.id !== id) } })), []);
-  const addGoal = useCallback((tier, title) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: [...p.goals[tier], { id: uid(), title, done: false }] } })), []);
+  const toggleGoal = React.useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].map((x) => (x.id === id ? { ...x, done: !x.done } : x)) } })), []);
+  const removeGoal = React.useCallback((tier, id) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter((x) => x.id !== id) } })), []);
+  const addGoal = React.useCallback((tier, title) => setD((p) => ({ ...p, goals: { ...p.goals, [tier]: [...p.goals[tier], { id: uid(), title, done: false }] } })), []);
 
-  const updateDeadline = useCallback((id, patch) =>
+  const updateDeadline = React.useCallback((id, patch) =>
     setD((p) => ({ ...p, deadlines: p.deadlines.map((x) => (x.id === id ? { ...x, ...patch } : x)) })), []);
 
   const i = (k) => inp[k] || "";
@@ -366,17 +360,17 @@ export default function App() {
 
   // ── 파생값 (hooks이라 조건부 return 앞에 위치해야 함) ──
   const today = todayStr();
-  const pendingDeadlines = useMemo(() =>
+  const pendingDeadlines = React.useMemo(() =>
     d.deadlines.filter((x) => !x.done).sort((a, b) => {
       if (!a.endDate && !b.endDate) return 0;
       if (!a.endDate) return 1;
       if (!b.endDate) return -1;
       return (parseLocalDateTime(a.endDate)?.getTime() || 0) - (parseLocalDateTime(b.endDate)?.getTime() || 0);
     }), [d.deadlines]);
-  const urgent = useMemo(() =>
+  const urgent = React.useMemo(() =>
     pendingDeadlines.filter((x) => { const dv = dDay(x.endDate); return dv !== null && dv <= 5; }),
     [pendingDeadlines]);
-  const todayDeadlines = useMemo(() =>
+  const todayDeadlines = React.useMemo(() =>
     d.deadlines.filter(x => {
       if (x.done) return false;
       const s = (x.startDate || "").slice(0, 10);
@@ -386,8 +380,8 @@ export default function App() {
       if (e) return e === today;
       return false;
     }), [d.deadlines, today]);
-  const routineRepeat = useMemo(() => d.routines.filter(r => r.type !== "today"), [d.routines]);
-  const routineToday = useMemo(() => d.routines.filter(r => r.type === "today"), [d.routines]);
+  const routineRepeat = React.useMemo(() => d.routines.filter(r => r.type !== "today"), [d.routines]);
+  const routineToday = React.useMemo(() => d.routines.filter(r => r.type === "today"), [d.routines]);
   const todoDone = d.todos.filter((t) => t.done).length;
   const todoTotal = d.todos.length;
   const routineDone = d.routines.filter((r) => r.done).length;
