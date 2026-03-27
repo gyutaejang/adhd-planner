@@ -691,7 +691,12 @@ function App() {
                         {dl.startDate && <span>▶ {fmtDt(dl.startDate)}　</span>}
                         {dl.endDate && <span>■ {fmtDt(dl.endDate)}</span>}
                       </div>
-                      {dl.memo && <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "5px", lineHeight: 1.6 }}>{dl.memo}</div>}
+                      {dl.memo && (
+                        <>
+                          <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "5px", lineHeight: 1.6, maxHeight: i("dlm-open") === dl.id ? "300px" : "60px", overflowY: i("dlm-open") === dl.id ? "auto" : "hidden", cursor: "pointer", WebkitMaskImage: i("dlm-open") === dl.id ? "none" : "linear-gradient(to bottom, black 50%, transparent 100%)" }} onClick={() => si("dlm-open", i("dlm-open") === dl.id ? "" : dl.id)}>{dl.memo}</div>
+                          {dl.memo.length > 60 && <div style={{ fontSize: "10px", color: "#3b82f6", marginTop: "2px", cursor: "pointer" }} onClick={() => si("dlm-open", i("dlm-open") === dl.id ? "" : dl.id)}>{i("dlm-open") === dl.id ? "▲ 접기" : "▼ 더보기"}</div>}
+                        </>
+                      )}
                     </div>
                     {dv !== null && !dl.done && <div style={{ fontSize: "13px", fontWeight: 500, color: clr, flexShrink: 0 }}>{dv < 0 ? `D+${Math.abs(dv)}` : dv === 0 ? "D-day" : `D-${dv}`}</div>}
                     <button type="button" onClick={() => setEditDl({ ...dl })} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
@@ -1009,8 +1014,9 @@ function App() {
                   </div>
                 )}
                 {dl.memo && (
-                  <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "6px", lineHeight: 1.6, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: "6px", wordBreak: "break-word" }}>
+                  <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginTop: "6px", lineHeight: 1.6, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: "6px", wordBreak: "break-word", maxHeight: i("dlm-open") === dl.id ? "200px" : "50px", overflowY: i("dlm-open") === dl.id ? "auto" : "hidden", cursor: "pointer", WebkitMaskImage: i("dlm-open") === dl.id ? "none" : "linear-gradient(to bottom, black 50%, transparent 100%)" }} onClick={() => si("dlm-open", i("dlm-open") === dl.id ? "" : dl.id)}>
                     {dl.memo}
+                    {dl.memo.length > 50 && <div style={{ fontSize: "10px", color: "#3b82f6", marginTop: "2px" }}>{i("dlm-open") === dl.id ? "▲ 접기" : "▼ 더보기"}</div>}
                   </div>
                 )}
                 <div style={{ display: "flex", gap: "4px", marginTop: "8px", alignItems: "center" }}>
@@ -1589,7 +1595,12 @@ function App() {
                     {kw.tag && <span style={{ fontSize: "10px", padding: "1px 7px", borderRadius: "999px", background: amber, color: "#fff", flexShrink: 0, fontWeight: 500 }}>{kw.tag}</span>}
                     <div style={{ flex: 1 }}>
                       {kw.source && <div style={{ fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "3px" }}>출처: {kw.source}</div>}
-                      {(kw.content || kw.text) && <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.6, wordBreak: "break-word" }}>{kw.content || kw.text}</div>}
+                      {(kw.content || kw.text) && (
+                        <>
+                          <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.6, wordBreak: "break-word", maxHeight: i("kw-open") === kw.id ? "300px" : "60px", overflowY: i("kw-open") === kw.id ? "auto" : "hidden", cursor: "pointer", WebkitMaskImage: i("kw-open") === kw.id ? "none" : "linear-gradient(to bottom, black 50%, transparent 100%)" }} onClick={() => si("kw-open", i("kw-open") === kw.id ? "" : kw.id)}>{kw.content || kw.text}</div>
+                          {(kw.content || kw.text || "").length > 60 && <div style={{ fontSize: "10px", color: amber, marginTop: "2px", cursor: "pointer" }} onClick={() => si("kw-open", i("kw-open") === kw.id ? "" : kw.id)}>{i("kw-open") === kw.id ? "▲ 접기" : "▼ 더보기"}</div>}
+                        </>
+                      )}
                     </div>
                     <button type="button" onClick={() => { si("kw-edit", kw.id); si("kw-e-src", kw.source||""); si("kw-e-con", kw.content||kw.text||""); si("kw-e-tag", kw.tag||""); }} style={{ ...styles.xBtn, fontSize: "13px", color: amber, flexShrink: 0 }}>✎</button>
                     <button type="button" onClick={() => safeRemove("studyKw", kw.id, kw.content || kw.text)} style={{ ...styles.xBtn, flexShrink: 0 }}>×</button>
@@ -1659,7 +1670,16 @@ function App() {
                   <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-primary)", marginBottom: item.content ? "5px" : 0 }}>{item.title}</div>
-                      {item.content && <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{item.content}</div>}
+                      {item.content && (
+                        <>
+                          <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: i("admin-open") === item.id ? "400px" : "80px", overflowY: i("admin-open") === item.id ? "auto" : "hidden", cursor: "pointer", WebkitMaskImage: i("admin-open") === item.id ? "none" : "linear-gradient(to bottom, black 60%, transparent 100%)" }} onClick={() => si("admin-open", i("admin-open") === item.id ? "" : item.id)}>{item.content}</div>
+                          {item.content.length > 80 && (
+                            <div style={{ fontSize: "10px", color: "#0891b2", marginTop: "3px", cursor: "pointer" }} onClick={() => si("admin-open", i("admin-open") === item.id ? "" : item.id)}>
+                              {i("admin-open") === item.id ? "▲ 접기" : "▼ 더보기"}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                     <button type="button" onClick={() => { si("admin-edit", item.id); si("admin-e-title", item.title||""); si("admin-e-content", item.content||""); }}
                       style={{ ...styles.xBtn, fontSize: "13px", color: "#0891b2", flexShrink: 0 }}>✎</button>
