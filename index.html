@@ -1512,7 +1512,12 @@ function App() {
                 </div>
               ) : (
                 <div style={{ padding: "8px 10px" }}>
-                  <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap", maxHeight: "120px", overflowY: "auto" }}>{n.text}</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap", maxHeight: i("note-open") === n.id ? "400px" : "80px", overflowY: i("note-open") === n.id ? "auto" : "hidden", cursor: "pointer", WebkitMaskImage: i("note-open") === n.id ? "none" : "linear-gradient(to bottom, black 60%, transparent 100%)" }} onClick={() => si("note-open", i("note-open") === n.id ? "" : n.id)}>{n.text}</div>
+                {n.text.length > 80 && (
+                  <div style={{ fontSize: "10px", color: "#06b6d4", marginTop: "3px", cursor: "pointer" }} onClick={() => si("note-open", i("note-open") === n.id ? "" : n.id)}>
+                    {i("note-open") === n.id ? "▲ 접기" : "▼ 더보기"}
+                  </div>
+                )}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
                     <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>{fmtTs(n.updatedAt || n.createdAt)}</span>
                     <div style={{ display: "flex", gap: "4px" }}>
