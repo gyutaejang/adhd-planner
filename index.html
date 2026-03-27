@@ -367,27 +367,30 @@ function App() {
 
   React.useEffect(() => {
     if (!ready || !user) return;
-    // Firebase에 저장할 때 배열→객체(id키) 변환 — 배열 인덱스 꼬임 방지
     const toObj = (arr) => {
       if (!arr || !arr.length) return {};
       return arr.reduce((acc, item) => { if (item?.id) acc[item.id] = item; return acc; }, {});
     };
-    const saveData = {
-      ...d,
-      deadlines: toObj(d.deadlines),
-      todos: toObj(d.todos),
-      routines: toObj(d.routines),
-      health: toObj(d.health),
-      quickNotes: toObj(d.quickNotes),
-      impulse: toObj(d.impulse),
-      studyKw: toObj(d.studyKw),
-      goals: {
-        short: toObj(d.goals.short),
-        mid: toObj(d.goals.mid),
-        long: toObj(d.goals.long),
-      },
-    };
-    S.set("adhd-v2", saveData, user.uid);
+    // 500ms 디바운스 — 빠른 연속 변경시 마지막만 저장
+    const timer = setTimeout(() => {
+      const saveData = {
+        ...d,
+        deadlines: toObj(d.deadlines),
+        todos: toObj(d.todos),
+        routines: toObj(d.routines),
+        health: toObj(d.health),
+        quickNotes: toObj(d.quickNotes),
+        impulse: toObj(d.impulse),
+        studyKw: toObj(d.studyKw),
+        goals: {
+          short: toObj(d.goals.short),
+          mid: toObj(d.goals.mid),
+          long: toObj(d.goals.long),
+        },
+      };
+      S.set("adhd-v2", saveData, user.uid);
+    }, 500);
+    return () => clearTimeout(timer);
   }, [d, ready, user]);
 
   const safeRemove = (key, id, label) => setConfirmDel({ key, id, label });
