@@ -6,6 +6,7 @@
   <title>ADHD 플래너</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#d97706">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ADHD 플래너">
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -297,6 +298,7 @@ function App() {
   const [goalTab, setGoalTab] = React.useState("short");
   const [inp, setInp] = React.useState({});
   const [editDl, setEditDl] = React.useState(null);
+  const [confirmDel, setConfirmDel] = React.useState(null);
   const _now = new Date();
   const [calMonth, setCalMonth] = React.useState({ year: _now.getFullYear(), month: _now.getMonth() });
   const [selectedDate, setSelectedDate] = React.useState(null);
@@ -324,10 +326,13 @@ function App() {
     if (!user) return;
     S.get("adhd-v2", user.uid).then((v) => {
       if (v) {
+        // Firebase는 배열을 숫자키 객체로 저장 → id 기반으로 안전하게 복원
         const toArr = (x) => {
           if (!x) return [];
-          if (Array.isArray(x)) return x;
-          return Object.values(x);
+          if (Array.isArray(x)) return x.filter(Boolean);
+          const vals = Object.values(x).filter(Boolean);
+          // id 있으면 id 기준, 없으면 그대로
+          return vals.filter(v => v && typeof v === "object");
         };
         const merged = {
           ...INIT,
@@ -361,9 +366,31 @@ function App() {
   }, [user]);
 
   React.useEffect(() => {
-    if (ready && user) S.set("adhd-v2", d, user.uid);
+    if (!ready || !user) return;
+    // Firebase에 저장할 때 배열→객체(id키) 변환 — 배열 인덱스 꼬임 방지
+    const toObj = (arr) => {
+      if (!arr || !arr.length) return {};
+      return arr.reduce((acc, item) => { if (item?.id) acc[item.id] = item; return acc; }, {});
+    };
+    const saveData = {
+      ...d,
+      deadlines: toObj(d.deadlines),
+      todos: toObj(d.todos),
+      routines: toObj(d.routines),
+      health: toObj(d.health),
+      quickNotes: toObj(d.quickNotes),
+      impulse: toObj(d.impulse),
+      studyKw: toObj(d.studyKw),
+      goals: {
+        short: toObj(d.goals.short),
+        mid: toObj(d.goals.mid),
+        long: toObj(d.goals.long),
+      },
+    };
+    S.set("adhd-v2", saveData, user.uid);
   }, [d, ready, user]);
 
+  const safeRemove = (key, id, label) => setConfirmDel({ key, id, label });
   const upd = React.useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
   const add = React.useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
   const remove = React.useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
@@ -784,6 +811,30 @@ function App() {
         );
       })()}
 
+      {/* ── 삭제 확인 모달 ── */}
+      {confirmDel && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ ...sCard("todo"), maxWidth: "300px", width: "90%", display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ fontSize: "15px", fontWeight: 500, color: "var(--color-text-primary)" }}>삭제할까요?</div>
+            {confirmDel.label && <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.6, wordBreak: "break-word" }}>"{confirmDel.label}"</div>}
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setConfirmDel(null)} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+              <button type="button" onClick={() => {
+                if (confirmDel.key === "goal") {
+                  const [tier, id] = confirmDel.id.split(":");
+                  setD(p => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter(x => x.id !== id) } }));
+                } else if (confirmDel.key === "studyKw") {
+                  setD(p => ({ ...p, studyKw: (p.studyKw||[]).filter(x => x.id !== confirmDel.id) }));
+                } else {
+                  remove(confirmDel.key, confirmDel.id);
+                }
+                setConfirmDel(null);
+              }} style={styles.addBtn("#dc2626")}>삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── EDIT MODAL ── */}
       {editDl && (
         <div style={{ position: "relative", minHeight: "0" }}>
@@ -894,7 +945,7 @@ function App() {
                 <div style={{ display: "flex", gap: "4px", marginTop: "8px", alignItems: "center" }}>
                   <button onClick={() => toggle("deadlines", dl.id)} style={{ ...styles.pill(dl.done), fontSize: "10px", padding: "2px 7px" }}>완료</button>
                   <button onClick={() => setEditDl({ ...dl })} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
-                  <button onClick={() => remove("deadlines", dl.id)} style={{ ...styles.xBtn, fontSize: "14px" }}>×</button>
+                  <button onClick={() => safeRemove("deadlines", dl.id, dl.title)} style={{ ...styles.xBtn, fontSize: "14px" }}>×</button>
                 </div>
               </div>
             );
@@ -1042,7 +1093,7 @@ function App() {
                     <span style={{ display: "block", fontSize: "10px", color: "var(--color-text-tertiary)", marginTop: "1px", fontFamily: "var(--font-mono)", textDecoration: "none" }}>{fmtTs(todo.doneAt)} 완료</span>
                   )}
                 </span>
-                <button onClick={() => remove("todos", todo.id)} style={styles.xBtn}>×</button>
+                <button onClick={() => safeRemove("todos", todo.id, todo.title)} style={styles.xBtn}>×</button>
               </div>
             ))}
           </div>
@@ -1123,7 +1174,7 @@ function App() {
                 >
                   {g.title}
                 </span>
-                <button onClick={() => removeGoal(goalTab, g.id)} style={styles.xBtn}>×</button>
+                <button onClick={() => safeRemove("goal", goalTab+":"+g.id, g.title)} style={styles.xBtn}>×</button>
               </div>
             ))}
             {(d.goals[goalTab] || []).length === 0 && (
@@ -1322,7 +1373,7 @@ function App() {
                       <span style={{ fontSize: "13px", color: "var(--color-text-primary)", flex: 1 }}>{item.title}</span>
                       <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)", flexShrink: 0 }}>{item.lockLabel || "24h"}</span>
                       <button type="button" onClick={() => { setEditImpulse(item.id); setEditImpulseData({ title: item.title, hours: "0" }); }} style={{ ...styles.xBtn, fontSize: "13px", color: amber }}>✎</button>
-                      <button type="button" onClick={() => remove("impulse", item.id)} style={styles.xBtn}>×</button>
+                      <button type="button" onClick={() => safeRemove("impulse", item.id, item.title)} style={styles.xBtn}>×</button>
                     </div>
                     {!unlocked && (
                       <div style={{ height: "3px", background: "var(--color-border-tertiary)", borderRadius: "999px", margin: "6px 0 4px", overflow: "hidden" }}>
@@ -1401,7 +1452,7 @@ function App() {
                       {(kw.content || kw.text) && <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.6, wordBreak: "break-word" }}>{kw.content || kw.text}</div>}
                     </div>
                     <button type="button" onClick={() => { si("kw-edit", kw.id); si("kw-e-src", kw.source||""); si("kw-e-con", kw.content||kw.text||""); si("kw-e-tag", kw.tag||""); }} style={{ ...styles.xBtn, fontSize: "13px", color: amber, flexShrink: 0 }}>✎</button>
-                    <button type="button" onClick={() => upd("studyKw", (d.studyKw||[]).filter(x => x.id !== kw.id))} style={{ ...styles.xBtn, flexShrink: 0 }}>×</button>
+                    <button type="button" onClick={() => safeRemove("studyKw", kw.id, kw.content || kw.text)} style={{ ...styles.xBtn, flexShrink: 0 }}>×</button>
                   </div>
                 </div>
               )}
