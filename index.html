@@ -379,9 +379,18 @@ function App() {
     };
 
     const doSave = (data) => {
+      // Firebase는 빈 문자열을 삭제함 → memo 등 빈 값 보호
+      const cleanDeadlines = (data.deadlines || []).map(dl => {
+        const clean = { ...dl };
+        if (!clean.memo) delete clean.memo;
+        if (!clean.startDate) delete clean.startDate;
+        if (!clean.endDate) delete clean.endDate;
+        if (!clean.repeat) delete clean.repeat;
+        return clean;
+      });
       const saveData = {
         ...data,
-        deadlines: toObj(data.deadlines),
+        deadlines: toObj(cleanDeadlines),
         todos: toObj(data.todos),
         routines: toObj(data.routines),
         health: toObj(data.health),
@@ -1490,7 +1499,7 @@ function App() {
             <div key={n.id} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: "2px solid #06b6d4", overflow: "hidden" }}>
               {i("note-edit") === n.id ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px" }}>
-                  <textarea autoFocus value={i("note-edit-val")} onChange={e => si("note-edit-val", e.target.value)} rows={4}
+                  <textarea autoFocus value={i("note-edit-val")} onChange={e => si("note-edit-val", e.target.value)} rows={6}
                     style={{ ...styles.inp, fontSize: "12px", resize: "vertical", lineHeight: 1.6, flex: "none" }} />
                   <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
                     <button type="button" onClick={() => { si("note-edit",""); si("note-edit-val",""); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
@@ -1503,7 +1512,7 @@ function App() {
                 </div>
               ) : (
                 <div style={{ padding: "8px 10px" }}>
-                  <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{n.text}</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap", maxHeight: "120px", overflowY: "auto" }}>{n.text}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
                     <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>{fmtTs(n.updatedAt || n.createdAt)}</span>
                     <div style={{ display: "flex", gap: "4px" }}>
