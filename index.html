@@ -187,6 +187,7 @@ const INIT = {
   quickNotes: [],
   impulse: [],
   studyKw: [],
+  admin: [],
   lastDate: "",
 };
 
@@ -201,6 +202,7 @@ const sectionColors = {
   health:   { border: green,     label: "#15803d" },    // 그린 — 건강
   impulse:  { border: "#6b7280", label: "#4b5563" },    // 그레이 — 충동락
   study:    { border: "#f59e0b", label: "#d97706" },    // 옐로 — 공부
+  admin:    { border: "#0891b2", label: "#0e7490" },    // 하늘 — 행정
 };
 const sCard = (key) => ({
   background: "var(--color-background-primary)",
@@ -344,6 +346,7 @@ function App() {
           quickNotes: toArr(v.quickNotes),
           impulse: toArr(v.impulse),
           studyKw: toArr(v.studyKw),
+          admin: toArr(v.admin),
           goals: {
             short: toArr(v.goals?.short),
             mid: toArr(v.goals?.mid),
@@ -382,6 +385,7 @@ function App() {
         quickNotes: toObj(d.quickNotes),
         impulse: toObj(d.impulse),
         studyKw: toObj(d.studyKw),
+      admin: toObj(d.admin),
         goals: {
           short: toObj(d.goals.short),
           mid: toObj(d.goals.mid),
@@ -828,6 +832,8 @@ function App() {
                   setD(p => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter(x => x.id !== id) } }));
                 } else if (confirmDel.key === "studyKw") {
                   setD(p => ({ ...p, studyKw: (p.studyKw||[]).filter(x => x.id !== confirmDel.id) }));
+                } else if (confirmDel.key === "admin") {
+                  setD(p => ({ ...p, admin: (p.admin||[]).filter(x => x.id !== confirmDel.id) }));
                 } else {
                   remove(confirmDel.key, confirmDel.id);
                 }
@@ -1483,6 +1489,79 @@ function App() {
         ) : (
           <button type="button" onClick={() => si("kw-adding", "1")}
             style={{ width: "100%", padding: "7px", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-mono)", background: "transparent", color: amber, border: `1px dashed ${amber}`, borderRadius: "var(--border-radius-md)", fontWeight: 500 }}>
+            + 새 항목 추가
+          </button>
+        )}
+      </div>
+
+      {/* ── ADMIN ── */}
+      <div style={sCard("admin")}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+          <div style={{ ...sLabel("admin"), marginBottom: 0 }}>행정 처리</div>
+          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>{(d.admin || []).length}개</div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "0.75rem", maxHeight: "300px", overflowY: "auto" }}>
+          {(d.admin || []).length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "4px 0" }}>바우처, 상담실 이용, 센터 규정 등</div>
+          )}
+          {(d.admin || []).map((item) => (
+            <div key={item.id} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: "2px solid #0891b2", overflow: "hidden" }}>
+              {i("admin-edit") === item.id ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px" }}>
+                  <input autoFocus value={i("admin-e-title")} onChange={e => si("admin-e-title", e.target.value)}
+                    placeholder="제목" style={{ ...styles.inp, fontSize: "12px" }} />
+                  <textarea value={i("admin-e-content")} onChange={e => si("admin-e-content", e.target.value)}
+                    placeholder="내용" rows={4} style={{ ...styles.inp, fontSize: "11px", resize: "vertical", lineHeight: 1.7, flex: "none" }} />
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    <button type="button" onClick={() => { si("admin-edit",""); si("admin-e-title",""); si("admin-e-content",""); }}
+                      style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+                    <button type="button" onClick={() => {
+                      const t = i("admin-e-title").trim(); const c = i("admin-e-content").trim();
+                      if (t || c) upd("admin", (d.admin||[]).map(x => x.id === item.id ? { ...x, title: t, content: c } : x));
+                      si("admin-edit",""); si("admin-e-title",""); si("admin-e-content","");
+                    }} style={styles.addBtn("#0891b2")}>저장</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "8px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--color-text-primary)", marginBottom: item.content ? "5px" : 0 }}>{item.title}</div>
+                      {item.content && <div style={{ fontSize: "12px", color: "var(--color-text-secondary)", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{item.content}</div>}
+                    </div>
+                    <button type="button" onClick={() => { si("admin-edit", item.id); si("admin-e-title", item.title||""); si("admin-e-content", item.content||""); }}
+                      style={{ ...styles.xBtn, fontSize: "13px", color: "#0891b2", flexShrink: 0 }}>✎</button>
+                    <button type="button" onClick={() => safeRemove("admin", item.id, item.title)}
+                      style={{ ...styles.xBtn, flexShrink: 0 }}>×</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {i("admin-adding") === "1" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "10px", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", border: "0.5px solid #0891b2" }}>
+            <input value={i("admin-title")} onChange={e => si("admin-title", e.target.value)}
+              placeholder="제목 (예: 바우처 이용 방법)" style={{ ...styles.inp, fontSize: "12px" }} />
+            <textarea value={i("admin-content")} onChange={e => si("admin-content", e.target.value)}
+              placeholder="내용을 적어요..." rows={4}
+              style={{ ...styles.inp, fontSize: "11px", resize: "vertical", lineHeight: 1.7, flex: "none" }} />
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => { si("admin-adding",""); si("admin-title",""); si("admin-content",""); }}
+                style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+              <button type="button" onClick={() => {
+                const t = i("admin-title").trim(); const c = i("admin-content").trim();
+                if (!t && !c) return;
+                upd("admin", [...(d.admin||[]), { id: uid(), title: t, content: c }]);
+                si("admin-adding",""); si("admin-title",""); si("admin-content","");
+              }} style={styles.addBtn("#0891b2")}>저장</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => si("admin-adding", "1")}
+            style={{ width: "100%", padding: "7px", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-mono)", background: "transparent", color: "#0891b2", border: "1px dashed #0891b2", borderRadius: "var(--border-radius-md)", fontWeight: 500 }}>
             + 새 항목 추가
           </button>
         )}
