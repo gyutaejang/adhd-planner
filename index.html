@@ -185,6 +185,7 @@ const INIT = {
   routines: [],
   health: [],
   quickNotes: [],
+  notes: [],
   impulse: [],
   studyKw: [],
   admin: [],
@@ -202,6 +203,7 @@ const sectionColors = {
   health:   { border: green,     label: "#15803d" },    // 그린 — 건강
   impulse:  { border: "#6b7280", label: "#4b5563" },    // 그레이 — 충동락
   study:    { border: "#f59e0b", label: "#d97706" },    // 옐로 — 공부
+  notes:    { border: "#06b6d4", label: "#0891b2" },    // 시안 — 메모
   admin:    { border: "#0891b2", label: "#0e7490" },    // 하늘 — 행정
 };
 const sCard = (key) => ({
@@ -344,6 +346,7 @@ function App() {
           routines: toArr(v.routines),
           health: toArr(v.health),
           quickNotes: toArr(v.quickNotes),
+          notes: toArr(v.notes),
           impulse: toArr(v.impulse),
           studyKw: toArr(v.studyKw),
           admin: toArr(v.admin),
@@ -374,30 +377,78 @@ function App() {
       if (!arr || !arr.length) return {};
       return arr.reduce((acc, item) => { if (item?.id) acc[item.id] = item; return acc; }, {});
     };
-    // 500ms 디바운스 — 빠른 연속 변경시 마지막만 저장
-    const timer = setTimeout(() => {
+
+    const doSave = (data) => {
       const saveData = {
-        ...d,
-        deadlines: toObj(d.deadlines),
-        todos: toObj(d.todos),
-        routines: toObj(d.routines),
-        health: toObj(d.health),
-        quickNotes: toObj(d.quickNotes),
-        impulse: toObj(d.impulse),
-        studyKw: toObj(d.studyKw),
-      admin: toObj(d.admin),
+        ...data,
+        deadlines: toObj(data.deadlines),
+        todos: toObj(data.todos),
+        routines: toObj(data.routines),
+        health: toObj(data.health),
+        quickNotes: toObj(data.quickNotes),
+        notes: toObj(data.notes),
+        impulse: toObj(data.impulse),
+        studyKw: toObj(data.studyKw),
+        admin: toObj(data.admin),
         goals: {
-          short: toObj(d.goals.short),
-          mid: toObj(d.goals.mid),
-          long: toObj(d.goals.long),
+          short: toObj(data.goals.short),
+          mid: toObj(data.goals.mid),
+          long: toObj(data.goals.long),
         },
       };
       S.set("adhd-v2", saveData, user.uid);
-    }, 500);
-    return () => clearTimeout(timer);
+    };
+
+    // 500ms 디바운스 — 빠른 연속 변경시 마지막만 저장
+    const timer = setTimeout(() => doSave(d), 500);
+
+    // 앱 숨겨질 때 (다른 앱으로 전환, 탭 전환) 즉시 저장
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") doSave(d);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [d, ready, user]);
 
-  const safeRemove = (key, id, label) => setConfirmDel({ key, id, label });
+  // 앱 포커스 돌아올 때 Firebase에서 최신 데이터 다시 로드
+  React.useEffect(() => {
+    if (!user) return;
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        S.get("adhd-v2", user.uid).then((v) => {
+          if (!v) return;
+          const toArr = (x) => {
+            if (!x) return [];
+            if (Array.isArray(x)) return x.filter(Boolean);
+            return Object.values(x).filter(v => v && typeof v === "object");
+          };
+          setD(prev => ({
+            ...prev,
+            ...v,
+            deadlines: toArr(v.deadlines),
+            todos: toArr(v.todos),
+            routines: toArr(v.routines),
+            health: toArr(v.health),
+            quickNotes: toArr(v.quickNotes),
+            notes: toArr(v.notes),
+            impulse: toArr(v.impulse),
+            studyKw: toArr(v.studyKw),
+            goals: {
+              short: toArr(v.goals?.short),
+              mid: toArr(v.goals?.mid),
+              long: toArr(v.goals?.long),
+            },
+          }));
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", handleFocus);
+    return () => document.removeEventListener("visibilitychange", handleFocus);
+  }, [user]);
   const upd = React.useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
   const add = React.useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
   const remove = React.useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
@@ -832,6 +883,8 @@ function App() {
                   setD(p => ({ ...p, goals: { ...p.goals, [tier]: p.goals[tier].filter(x => x.id !== id) } }));
                 } else if (confirmDel.key === "studyKw") {
                   setD(p => ({ ...p, studyKw: (p.studyKw||[]).filter(x => x.id !== confirmDel.id) }));
+                } else if (confirmDel.key === "notes") {
+                  setD(p => ({ ...p, notes: (p.notes||[]).filter(x => x.id !== confirmDel.id) }));
                 } else if (confirmDel.key === "admin") {
                   setD(p => ({ ...p, admin: (p.admin||[]).filter(x => x.id !== confirmDel.id) }));
                 } else {
@@ -1421,6 +1474,70 @@ function App() {
             submit("impulse", () => add("impulse", { id: uid(), title: i("impulse"), lockedAt: Date.now(), unlockAt: Date.now() + hrs*36e5, lockLabel: hrs >= 24 ? Math.round(hrs/24)+"일" : hrs+"h" }), ["impulse", "imp-h"]);
           }} style={{ ...styles.addBtn("#6b7280") }}>lock</button>
         </div>
+      </div>
+
+      {/* ── FREE NOTES ── */}
+      <div style={sCard("notes")}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.625rem" }}>
+          <div style={{ ...sLabel("notes"), marginBottom: 0 }}>메모</div>
+          <div style={{ fontSize: "11px", color: "var(--color-text-tertiary)" }}>{(d.notes || []).length}개</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "0.75rem", maxHeight: "260px", overflowY: "auto" }}>
+          {(d.notes || []).length === 0 && (
+            <div style={{ fontSize: "12px", color: "var(--color-text-tertiary)", padding: "4px 0" }}>행정처리, 기록, 생각 등 자유롭게</div>
+          )}
+          {[...(d.notes || [])].reverse().map(n => (
+            <div key={n.id} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", borderLeft: "2px solid #06b6d4", overflow: "hidden" }}>
+              {i("note-edit") === n.id ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "8px 10px" }}>
+                  <textarea autoFocus value={i("note-edit-val")} onChange={e => si("note-edit-val", e.target.value)} rows={4}
+                    style={{ ...styles.inp, fontSize: "12px", resize: "vertical", lineHeight: 1.6, flex: "none" }} />
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    <button type="button" onClick={() => { si("note-edit",""); si("note-edit-val",""); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+                    <button type="button" onClick={() => {
+                      const v = i("note-edit-val").trim();
+                      if (v) upd("notes", (d.notes||[]).map(x => x.id === n.id ? { ...x, text: v, updatedAt: Date.now() } : x));
+                      si("note-edit",""); si("note-edit-val","");
+                    }} style={styles.addBtn("#06b6d4")}>저장</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "8px 10px" }}>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-primary)", lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>{n.text}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px" }}>
+                    <span style={{ fontSize: "10px", color: "var(--color-text-tertiary)" }}>{fmtTs(n.updatedAt || n.createdAt)}</span>
+                    <div style={{ display: "flex", gap: "4px" }}>
+                      <button type="button" onClick={() => { si("note-edit", n.id); si("note-edit-val", n.text); }} style={{ ...styles.xBtn, fontSize: "13px", color: "#06b6d4" }}>✎</button>
+                      <button type="button" onClick={() => safeRemove("notes", n.id, n.text.slice(0,20))} style={styles.xBtn}>×</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {i("note-adding") === "1" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <textarea autoFocus value={i("note-new")} onChange={e => si("note-new", e.target.value)}
+              placeholder="내용을 자유롭게 입력하세요..." rows={4}
+              style={{ ...styles.inp, fontSize: "12px", resize: "vertical", lineHeight: 1.6, flex: "none" }}
+              onKeyDown={e => { if (e.key === "Escape") { si("note-adding",""); si("note-new",""); } }} />
+            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => { si("note-adding",""); si("note-new",""); }} style={{ ...styles.addBtn("#6b7280"), background: "transparent", color: "var(--color-text-secondary)", border: "0.5px solid var(--color-border-secondary)" }}>취소</button>
+              <button type="button" onClick={() => {
+                const v = i("note-new").trim();
+                if (!v) return;
+                upd("notes", [...(d.notes||[]), { id: uid(), text: v, createdAt: Date.now(), updatedAt: Date.now() }]);
+                si("note-adding",""); si("note-new","");
+              }} style={styles.addBtn("#06b6d4")}>저장</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => si("note-adding","1")}
+            style={{ width: "100%", padding: "7px", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-mono)", background: "transparent", color: "#06b6d4", border: "1px dashed #06b6d4", borderRadius: "var(--border-radius-md)", fontWeight: 500 }}>
+            + 메모 추가
+          </button>
+        )}
       </div>
 
       {/* ── STUDY KEYWORDS ── */}
