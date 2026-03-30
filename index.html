@@ -458,6 +458,7 @@ function App() {
     document.addEventListener("visibilitychange", handleFocus);
     return () => document.removeEventListener("visibilitychange", handleFocus);
   }, [user]);
+  const safeRemove = (key, id, label) => setConfirmDel({ key, id, label });
   const upd = React.useCallback((key, val) => setD((p) => ({ ...p, [key]: val })), []);
   const add = React.useCallback((key, obj) => setD((p) => ({ ...p, [key]: [...(p[key] || []), obj] })), []);
   const remove = React.useCallback((key, id) => setD((p) => ({ ...p, [key]: p[key].filter((x) => x.id !== id) })), []);
